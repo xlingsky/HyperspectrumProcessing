@@ -47,7 +47,7 @@ class Pos{
 typedef Eigen::Matrix<double, 3, 4> CameraMatrixType;
 
 Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double,3,Eigen::Dynamic>& im, const Eigen::Matrix<double,4,3>& plane_transformation);
-Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double, 3, Eigen::Dynamic>& im, const Eigen::Matrix<double, 4, 1>& plane_transformation);
+Eigen::Matrix<double,4,Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera,const Eigen::Matrix<double,3,Eigen::Dynamic>& im, const Eigen::Matrix<double,4,1>& plane_equation);
 
 class PinholeCamera{
  protected:

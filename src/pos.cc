@@ -334,6 +334,40 @@ Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatri
     return plane_transformation * planex;
 }
 
+#define EPSILON std::numeric_limits<double>::epsilon()
+bool plane_transformation_2pto3p(const Eigen::Matrix<double,4,1>& plane_equation, Eigen::Matrix<double,4,3>& m){
+  if(fabs(plane_equation[0])>EPSILON){
+    m << plane_equation[1],plane_equation[2],plane_equation[3],
+        -plane_equation[0],0,0,
+        0,-plane_equation[0],0,
+        0,0,-plane_equation[0];
+  }else if(fabs(plane_equation[1])>EPSILON){
+    m << -plane_equation[1],0,0,
+        plane_equation[0],plane_equation[2],plane_equation[3],
+        0,-plane_equation[1],0,
+        0,0,-plane_equation[1];
+  }else if(fabs(plane_equation[2])>EPSILON){
+    m << 1,0,0,
+        0,1,0,
+        0,0,-plane_equation[3]/plane_equation[2],
+        0,0,1;
+  }else if(fabs(plane_equation[3])>EPSILON){
+    m<<1,0,0,
+        0,1,0,
+        0,0,1,
+        0,0,0;
+  }else return false;
+  return true;
+}
+
+Eigen::Matrix<double,4,Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double,3,Eigen::Dynamic>& im, const Eigen::Matrix<double,4,1>& plane_equation){
+  Eigen::Matrix<double,4,3> plane_transformation;
+  if(plane_transformation_2pto3p(plane_equation, plane_transformation)){
+    return BackProjectionToPlane(camera, im, plane_transformation);
+  }
+  return Eigen::Matrix<double,4,Eigen::Dynamic>::Zero(4,1);
+}
+
 bool PinholeCamera::Load(const char* filepath) {
     FILE* fp = fopen(filepath, "r");
     if (fp == nullptr) return false;
