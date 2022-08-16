@@ -394,4 +394,19 @@ CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
   return m*h;
 }
 
+void LinescanModel::test(){
+  auto& posdata = _pos->_data;
+  auto it1 = posdata.begin();
+  ++it1;
+  auto it2 = it1;//posdata.rbegin();
+  ++it2;
+  auto cam1 = CameraMatrix(it1->first);
+
+  Eigen::Matrix<double, 4, 1> x;
+  x << it2->second.x[0], it2->second.x[1], it2->second.x[2], 1;
+  auto im = (cam1*x).hnormalized();
+  printf("(%lf,%lf)<->%d", im[0], im[1], it2->first);
+}
+
+
 };

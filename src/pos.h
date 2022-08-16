@@ -8,8 +8,11 @@
 
 namespace HSP{
 
+class LinescanModel;
+
 class Pos{
  public:
+  friend class LinescanModel;
   struct record{
     unsigned int frame;
     unsigned int week;
@@ -88,6 +91,7 @@ class LinescanModel{
     _camera = cam;
   }
   CameraMatrixType CameraMatrix(double linenumber) const;
+  void test();
 };
 
 };
