@@ -1,0 +1,9 @@
+build*
+xcode/
+data/
+
+compile_commands.json
+launch.json
+.DS_Store
+.nvimlog
+
