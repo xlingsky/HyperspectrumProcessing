@@ -44,15 +44,19 @@ class Pos{
   bool LoadAux(const char* filepath);
 };
 
+typedef Eigen::Matrix<double, 3, 4> CameraMatrixType;
+
+Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double,3,Eigen::Dynamic>& im, const Eigen::Matrix<double,4,3>& plane_transformation);
+Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double, 3, Eigen::Dynamic>& im, const Eigen::Matrix<double, 4, 1>& plane_transformation);
+
 class PinholeCamera{
- public:
-  typedef Eigen::Matrix<double,3,4> CameraMatrixType;
  protected:
   Eigen::Matrix3d _intrinsic;
   Eigen::Quaterniond _pose;
   Eigen::Vector3d _translation;
  public:
   PinholeCamera() : _intrinsic(Eigen::Matrix3d::Identity()) {};
+  bool Load(const char* filepath);
   CameraMatrixType CameraMatrix() const{
     CameraMatrixType m;
     m.block<3,3>(0,0).noalias() = _intrinsic*_pose.matrix();
@@ -69,8 +73,6 @@ class PinholeCamera{
 };
 
 class LinescanModel{
- public:
-  typedef PinholeCamera::CameraMatrixType CameraMatrixType;
  protected:
   PinholeCamera* _camera;
   Pos* _pos;

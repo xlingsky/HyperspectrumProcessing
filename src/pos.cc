@@ -328,7 +328,27 @@ int Pos::Check(){
   return 0;
 }
 
-LinescanModel::CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
+Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double, 3, Eigen::Dynamic>& im, const Eigen::Matrix<double, 4, 3>& plane_transformation) {
+    Eigen::Matrix<double, 3, 3> m = camera * plane_transformation;
+    Eigen::Matrix<double, 3, Eigen::Dynamic> planex = m.inverse() * im;
+    return plane_transformation * planex;
+}
+
+bool PinholeCamera::Load(const char* filepath) {
+    FILE* fp = fopen(filepath, "r");
+    if (fp == nullptr) return false;
+    bool ret = false;
+    double f, pixel, x0, y0;
+    if (fscanf(fp, "%lf%lf%lf%lf", &f, &pixel, &x0, &y0) == 4) {
+        SetFocalLength(f / pixel);
+        SetPrincipalPoint(x0, y0);
+        ret = true;
+    }
+    fclose(fp);
+    return ret;
+}
+
+CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
 {
   CameraMatrixType m = _camera->CameraMatrix();
   double x[3];
