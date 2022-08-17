@@ -166,6 +166,8 @@ Pos::~Pos(){
     GDALDestroyTransformer(_reprojector);
   if(_interpolator)
     DestroyInterpolator(_interpolator);
+  if (_utm_wkt)
+      CPLFree(_utm_wkt);
 }
 
 bool Pos::load(const char *filepath){
@@ -174,14 +176,21 @@ bool Pos::load(const char *filepath){
   if(ext==nullptr)
     return false;
 
-  if(strcmp(ext+1, "aux")==0)
-    return LoadAux(filepath);
+  bool ret = false;
 
-  return false;
+  if(strcmp(ext+1, "aux")==0)
+    ret = LoadAux(filepath);
+
+  if (ret) {
+      Reprojection();
+      BuildInterpolator();
+  }
+
+  return ret;
 }
 
 bool Pos::LoadAux(const char *filepath) {
-  FILE* fp = fopen(filepath, "r");
+  FILE* fp = fopen(filepath, "rb");
 
   std::map<int, record> pos_data;
 
@@ -252,6 +261,7 @@ void Pos::Reprojection(){
     if(wkt_src!=nullptr) CPLFree(wkt_src);
     if(wkt_dst!=nullptr) CPLFree(wkt_dst);
 #endif
+    dstSRS.exportToWkt(&_utm_wkt);
   }
   for(auto it=_data.begin(); it!=_data.end(); ++it){
     auto& item = it->second;
@@ -385,25 +395,49 @@ bool PinholeCamera::Load(const char* filepath) {
 CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
 {
   CameraMatrixType m = _camera->CameraMatrix();
-  double x[3];
-  _pos->GetPosition(linenumber, x);
+  Eigen::Vector3d x;
+  _pos->GetPosition(linenumber, x.data());
   auto pose = _pos->GetQuaternion(linenumber);
   Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
-  h.block<3, 3>(0,0) = pose.matrix();
-  h.block<3, 1>(0,3) << -x[0], -x[1], -x[2];
+  h.block<3, 3>(0,0) = pose.matrix().transpose();
+  h.block<3, 1>(0,3) << -h.block<3, 3>(0, 0)*x;
   return m*h;
 }
 
-void LinescanModel::test(){
+void LinescanModel::test(const char* gcppath, const char* prjpath){
   auto& posdata = _pos->_data;
   auto it1 = posdata.begin();
   ++it1;
   auto it2 = it1;//posdata.rbegin();
   ++it2;
+
+  return;
+  double gsd = std::fabs(it1->second.x[0]-it2->second.x[0])/((double)it2->first-it1->first);
+  int x_range = 500;
+  int x_center = 1024-300;
+
+  int flag = std::abs(it1->second.a[2] - 90) > std::abs(it1->second.a[2] - 270) ? 1 : -1;
+
+  FILE* fp = fopen(prjpath, "w");
+  if (fp) {
+      fprintf(fp, "%s", _pos->_utm_wkt);
+      fclose(fp);
+  }
+  fp = fopen(gcppath, "w");
+  if (fp) {
+      fprintf(fp, "%d %d %lf %lf\n", x_center - x_range, it1->first, it1->second.x[0], it1->second.x[1] + flag * gsd * (-x_range));
+      fprintf(fp, "%d %d %lf %lf\n", x_center + x_range, it1->first, it1->second.x[0], it1->second.x[1] + flag * gsd * x_range);
+      fprintf(fp, "%d %d %lf %lf\n", x_center - x_range, it2->first, it2->second.x[0], it2->second.x[1] + flag * gsd * (-x_range));
+      fprintf(fp, "%d %d %lf %lf\n", x_center + x_range, it2->first, it2->second.x[0], it2->second.x[1] + flag * gsd * x_range);
+      fclose(fp);
+  }
+  
+  return;
+
   auto cam1 = CameraMatrix(it1->first);
 
   Eigen::Matrix<double, 4, 1> x;
-  x << it2->second.x[0], it2->second.x[1], it2->second.x[2], 1;
+  x << it2->second.x[0], it2->second.x[1], it2->second.x[2]-1500, 1;
   auto im = (cam1*x).hnormalized();
   printf("(%lf,%lf)<->%d", im[0], im[1], it2->first);
 }

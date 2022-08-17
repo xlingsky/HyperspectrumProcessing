@@ -27,8 +27,9 @@ class Pos{
   std::map<int, record> _data;
   void* _reprojector;
   void* _interpolator;
+  char* _utm_wkt;
  public:
-  Pos() : _reprojector(nullptr), _interpolator(nullptr) {
+     Pos() : _reprojector(nullptr), _interpolator(nullptr), _utm_wkt(nullptr) {
   }
   ~Pos();
   bool load(const char* filepath);
@@ -58,7 +59,7 @@ class PinholeCamera{
   Eigen::Quaterniond _pose;
   Eigen::Vector3d _translation;
  public:
-  PinholeCamera() : _intrinsic(Eigen::Matrix3d::Identity()) {};
+  PinholeCamera() : _intrinsic(Eigen::Matrix3d::Identity()), _pose(Eigen::Quaterniond::Identity()), _translation(Eigen::Vector3d::Zero()) {};
   bool Load(const char* filepath);
   CameraMatrixType CameraMatrix() const{
     CameraMatrixType m;
@@ -91,7 +92,7 @@ class LinescanModel{
     _camera = cam;
   }
   CameraMatrixType CameraMatrix(double linenumber) const;
-  void test();
+  void test( const char* gcppath, const char* prjpath);
 };
 
 };

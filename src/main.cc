@@ -235,7 +235,15 @@ int main(int argc, char* argv[]){
       {
         HSP::Pos pos;
         pos.load(path.string().c_str());
-        pos.test();
+        HSP::PinholeCamera cam;
+        cam.Load("G:\\jincang\\camera_vnir.txt");
+        HSP::LinescanModel model;
+        model.SetCamera(&cam);
+        model.SetPos(&pos);
+        boost::filesystem::path gcppath = path; gcppath.replace_extension(".gcp");
+        boost::filesystem::path prjpath = path; prjpath.replace_extension(".prj");
+        model.test(gcppath.string().c_str(), prjpath.string().c_str());
+        return 0;
       }
       HSP::Aux2Pos(path.string().c_str(), pospath.string().c_str());
       return 0;
