@@ -54,6 +54,25 @@ def createTask(rr, dirpath):
             ret.append(taskpath)
     return ret
 
+def loadCSV(csvpath):
+    with open(csvpath,'r') as f:
+        ret = list()
+        for l in f:
+            items = l.rstrip().split(',')
+            items[2] = float(items[2])
+            items[3] = float(items[3])
+            ret.append(items)
+        return ret
+
+def check(items, pt):
+    dist = 0.006**2
+    ret = list()
+    for i in items:
+        err = (i[2]-pt[0])**2+(i[3]-pt[1])**2
+        if err < dist:
+            ret.append(i)
+    return ret
+
 def main(filepath):
     xmin = 101.748
     xmax = 101.902

@@ -24,9 +24,9 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
 
   if( sscanf(p+1, "%u%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf"
              , &rec.week, &rec.time
-             , rec.blh+1, rec.blh, rec.blh+2
-             , rec.vx+1, rec.vx, rec.vx+2
-             , rec.a+1, rec.a, rec.a+2
+             , rec.blh, rec.blh+1, rec.blh+2
+             , rec.vx, rec.vx+1, rec.vx+2
+             , rec.a, rec.a+1, rec.a+2
              ) != 11){
     return false;
   }
@@ -37,7 +37,7 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
 bool MARKPOSA(const char* msg, HSP::Pos::record& rec){
   const char* p = strstr(msg, "SINGLE");
   if( sscanf(p+strlen("SINGLE"), "%*c%lf%*c%lf%*c%lf"
-             , rec.blh+1, rec.blh, rec.blh+2
+             , rec.blh, rec.blh+1, rec.blh+2
              ) != 3){
     return false;
   }
@@ -234,8 +234,8 @@ void Pos::Reprojection(){
   if(!_reprojector){
     double lon,lat;
     auto& item = _data.begin()->second;
-    lon = item.blh[0];
-    lat = item.blh[1];
+    lon = item.blh[1];
+    lat = item.blh[0];
     OGRSpatialReference srcSRS, dstSRS;
     srcSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
     dstSRS.SetUTM(int((lon+180)/6)+1,lat>0);
@@ -267,7 +267,18 @@ void Pos::Reprojection(){
     auto& item = it->second;
     memcpy(item.x, item.blh, sizeof(double)*3);
     int valid;
-    GDALUseTransformer(_reprojector, 0, 1, item.x, item.x+1, item.x+2, &valid);
+    GDALUseTransformer(_reprojector, 0, 1, item.x+1, item.x, item.x+2, &valid);
+    if (_offset[0] == 0) {
+        _offset[0] = item.x[0];
+        _offset[1] = item.x[1];
+        _offset[2] = item.x[2];
+        item.x[0] = item.x[1] = item.x[2] = 0;
+    }
+    else {
+        item.x[0] -= _offset[0];
+        item.x[1] -= _offset[1];
+        item.x[2] -= _offset[2];
+    }
   }
 }
 
@@ -293,8 +304,8 @@ int Pos::GetPos(double lineid, double x[3], double a[3]){
 Eigen::Quaterniond Pos::GetQuaternion(double lineid){
   double a[3];
   GetAngle(lineid, a);
-  auto pitch = Eigen::AngleAxisd(a[0]*M_PI/180, Eigen::Vector3d::UnitY());
-  auto roll = Eigen::AngleAxisd(a[1]*M_PI/180, Eigen::Vector3d::UnitX());
+  auto pitch = Eigen::AngleAxisd(a[1]*M_PI/180, Eigen::Vector3d::UnitY());
+  auto roll = Eigen::AngleAxisd(a[0]*M_PI/180, Eigen::Vector3d::UnitX());
   auto yaw = Eigen::AngleAxisd(a[2]*M_PI/180, Eigen::Vector3d::UnitZ());
   return yaw*pitch*roll;
 }
@@ -411,6 +422,24 @@ void LinescanModel::test(const char* gcppath, const char* prjpath){
   auto it2 = it1;//posdata.rbegin();
   ++it2;
 
+  CameraMatrixType cam1 = _camera->CameraMatrix();
+  Eigen::Vector3d c;
+  _pos->GetPosition(it1->first, c.data());
+  auto pose = _pos->GetQuaternion(it1->first);
+  Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
+  h.block<3, 3>(0, 0) = pose.matrix().transpose();
+  h.block<3, 1>(0, 3) << -h.block<3, 3>(0, 0) * c;
+  auto y = h * c.homogeneous();
+  auto z = cam1 * y;
+  std::cout << z;
+  
+
+  Eigen::Matrix<double, 4, 1> x;
+  x << it2->second.x[0], it2->second.x[1], it2->second.x[2] - 1500, 1;
+  auto k = h*x;
+  auto im = (cam1 * x).hnormalized();
+  printf("(%lf,%lf)<->%d", im[0], im[1], it2->first);
+
   return;
   double gsd = std::fabs(it1->second.x[0]-it2->second.x[0])/((double)it2->first-it1->first);
   int x_range = 500;
@@ -433,13 +462,6 @@ void LinescanModel::test(const char* gcppath, const char* prjpath){
   }
   
   return;
-
-  auto cam1 = CameraMatrix(it1->first);
-
-  Eigen::Matrix<double, 4, 1> x;
-  x << it2->second.x[0], it2->second.x[1], it2->second.x[2]-1500, 1;
-  auto im = (cam1*x).hnormalized();
-  printf("(%lf,%lf)<->%d", im[0], im[1], it2->first);
 }
 
 

@@ -28,8 +28,10 @@ class Pos{
   void* _reprojector;
   void* _interpolator;
   char* _utm_wkt;
+  double _offset[3];
  public:
      Pos() : _reprojector(nullptr), _interpolator(nullptr), _utm_wkt(nullptr) {
+         _offset[0] = _offset[1] = _offset[2] = 0;
   }
   ~Pos();
   bool load(const char* filepath);

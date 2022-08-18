@@ -19,30 +19,15 @@ template<typename T>
 bool load(const char* filepath, size_t count, T* data){
   FILE* fp = fopen(filepath, "r");
   if(fp==nullptr) return false;
-
-  fseek(fp, 0, SEEK_END);
-  auto len = ftell(fp);
-  rewind(fp);
-
-  char* str = new char[len+1];
-  fread( str, 1, len, fp);
+  size_t i;
+  for ( i = 0; i < count; ++i) {
+      double t;
+      if (fscanf(fp, "%lf", &t) != 1) break;
+      data[i] = (T)t;
+  }
+  
   fclose(fp);
 
-  str[len] = 0;
-  size_t i;
-
-  // std::stringstream sstr(str);
-  // for( i=0; i<count; ++i)
-  //   if(!(sstr >> data[i])) break;
-
-  const char* pstr = str;
-  for( i=0; i<count; ++i){
-    int n;
-    if(sscanf(pstr, "%g%*c%n", data+i, &n)!=1) break;
-    pstr += n;
-  }
-
-  delete[] str;
   return i==count;
 }
 
@@ -61,10 +46,7 @@ template <typename T> bool save(const char *filepath, T *data, size_t count, int
   return true;
 }
 
-class BufferOperator{
- public:
-  virtual bool operator()(int r, void* data, int cols, int rows) = 0;
-};
+using BufferOperator = ipf::BufferOperator;
 
 class PixelCorrection : public BufferOperator{
  protected:
@@ -128,7 +110,7 @@ class DarkLevelCorrection : public PixelCorrection{
     if(_data) delete[] _data;
   }
   bool load(const char* filepath){
-    return ::radiometric::load(filepath, cols()*rows(), _data);
+    return ::radiometric::load(filepath, (size_t)cols()*rows(), _data);
   }
   DataType correct(DataType d, int i) override{
     return d-_data[i];
@@ -143,7 +125,7 @@ class NonUniformCorrection : public PixelCorrection{
   DataType* _b;
  public:
   NonUniformCorrection(int cols, int rows, int bands) : PixelCorrection(cols, rows, bands) {
-    size_t sz = cols*bands;
+    size_t sz = (size_t)cols*bands;
     _a = new DataType[sz];
     _b = new DataType[sz];
   }
@@ -152,7 +134,7 @@ class NonUniformCorrection : public PixelCorrection{
     if(_b) delete[] _b;
   }
   bool load(const char* a, const char* b){
-    if(::radiometric::load(a, cols()*rows(), _a) && ::radiometric::load(b, cols()*rows(), _b))
+    if(::radiometric::load(a, (size_t)cols()*rows(), _a) && ::radiometric::load(b, (size_t)cols()*rows(), _b))
       return true;
     return false;
   }

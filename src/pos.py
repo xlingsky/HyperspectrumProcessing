@@ -55,21 +55,25 @@ class POS:
     def load(self, filepath):
         pos = list()
         keyword = 'MARK1PVAA'
-        with open(filepath,'r') as f:
-            self._name = os.path.splitext(os.path.basename(filepath))[0]
-            lines = f.readlines()
-            last = ''
-            for i, l in enumerate(lines):
-                p = l.find(keyword)
-                if p==-1:
-                    continue
-                t = l[p:]
-                if last != t:
-                    last = t
-                    lon,lat,hei = MARK1PVAA(t)
-                    pos.append([i, lon,lat,hei])
-        self._pos = pos
-        return len(pos)>0
+        try:
+            with open(filepath,'r') as f:
+                self._name = os.path.splitext(os.path.basename(filepath))[0]
+                lines = f.readlines()
+                last = ''
+                for i, l in enumerate(lines):
+                    p = l.find(keyword)
+                    if p==-1:
+                        continue
+                    t = l[p:]
+                    if last != t:
+                        last = t
+                        lon,lat,hei = MARK1PVAA(t)
+                        pos.append([i, lon,lat,hei])
+            self._pos = pos
+            return len(pos)>0
+        except:
+            self._pos = []
+            return False
     def search(self, poly):
         ret = list()
         for p in self._pos:
@@ -142,6 +146,16 @@ class POS:
 
         with open(kmlpath, 'w') as fp:
             fp.write(content.decode('utf-8'))
+
+def PosFiles2CSV(poslist, csvpath):
+    with open(csvpath,'w') as f:
+        for p in poslist:
+            pos = POS(p)
+            if len(pos._pos) < 1:
+                print('{} NOT FOUND'.format(p))
+                continue
+            for i in pos._pos:
+                f.write('{},{},{},{}\n'.format(p,i[0],i[1],i[2]))
 
 def PosFiles2KML(poslist, kmlpath, name='real flight'):
     doc = KML.Document()

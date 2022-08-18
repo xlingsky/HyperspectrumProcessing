@@ -5,26 +5,73 @@
 #include "gdal_traits.hpp"
 
 #include <opencv2/core/core.hpp>
+#include <numeric>
 
 namespace ipf{
 
-template<class RowOp>
-void RowMajor(GDALDataset* src, GDALDataset* dst, RowOp& op){
-  using DataType = typename RowOp::DataType;
-  int buffer_cols = src->GetRasterXSize()>dst->GetRasterXSize()?src->GetRasterXSize():dst->GetRasterXSize();
-  int buffer_rows = src->GetRasterCount()>dst->GetRasterCount()?src->GetRasterCount():dst->GetRasterCount();
+    class BufferOperator {
+    public:
+        BufferOperator() {}
+        virtual ~BufferOperator() {}
+        virtual bool operator()(int r, void* data, int cols, int rows) = 0;
+    };
 
-  std::vector<DataType> data((size_t)buffer_cols*buffer_rows);
+    class Framework {
+    public:
+        Framework() : _datatype(GDT_Byte), _datatype_size(sizeof(unsigned char)), _src(nullptr), _max_buffer_size(1024*1024*1024) {
+        }
+        virtual ~Framework() {}
+        void SetDataType(GDALDataType datatype) { _datatype = datatype; }
+        void SetDataTypeSize(int size) { _datatype_size = size; }
+        int GetDataTypeSize() const { return _datatype_size; }
+        GDALDataType GetDataType() const { return _datatype; }
+        size_t GetMaxBufferSize() const { return _max_buffer_size; }
 
-  int pixelspace = sizeof(DataType);
-  int bandspace = sizeof(DataType)*buffer_cols;
-  int linespace = 0;
+        virtual bool Apply(BufferOperator* op) = 0;
+        bool Apply(int srcwin[6], int bufferwin[3], BufferOperator* op) {
+            l;
+        }
+    protected:
+        int _datatype_size;
+        GDALDataType _datatype;
+        size_t _max_buffer_size;
+        GDALDataset* _src;
+    };
 
-  for(int r=0; r<src->GetRasterYSize(); ++r){
-    if(src->RasterIO(GF_Read, 0, r, src->GetRasterXSize(), 1, &data[0], src->GetRasterXSize(), 1, gdal::DataType<DataType>::type(), buffer_rows, nullptr, pixelspace, linespace, bandspace)){}
-    if( op(r, &data[0], buffer_cols, buffer_rows) && dst->RasterIO(GF_Write, 0, r, dst->GetRasterXSize(), 1, &data[0], dst->GetRasterXSize(), 1, gdal::DataType<DataType>::type(), buffer_rows, nullptr, pixelspace, linespace, bandspace)){}
-  }
-}
+    class RowMajor : public Framework {
+    public:
+        RowMajor(GDALDataset* src, GDALDataset* dst) : _src(src), _dst(dst) {}
+        virtual ~RowMajor() {}
+        bool Apply(BufferOperator* op) override {
+            int buffer_cols = HasSrcWinX() ?  GetSrcWin()[1]: _src->GetRasterXSize();
+            int buffer_rows = _src->GetRasterCount();
+            std::vector<int> bandlist;
+            if (HasSrcWinZ()) {
+                buffer_rows = GetSrcWin()[5];
+                bandlist.resize(buffer_rows);
+                std::iota(bandlist.begin(), bandlist.end(), GetSrcWin()[4]);
+            }
+
+            size_t buffer_size = (size_t)buffer_cols * buffer_rows;
+            int buffer_count = GetMaxBufferSize() / buffer_size;
+
+            std::vector<char> data();
+
+            int pixelspace = GetDataTypeSize();
+            int bandspace = GetDataTypeSize() * buffer_cols;
+            int linespace = bandspace * buffer_rows;
+
+            for (int r = 0; r < _src->GetRasterYSize(); ++r) {
+                if (_src->RasterIO(GF_Read, 0, r, _src->GetRasterXSize(), 1, &data[0], _src->GetRasterXSize(), 1, _datatype, buffer_rows, nullptr, pixelspace, linespace, bandspace)) {}
+                if ((*op)(r, &data[0], buffer_cols, buffer_rows) && _dst->RasterIO(GF_Write, 0, r, _dst->GetRasterXSize(), 1, &data[0], _dst->GetRasterXSize(), 1, _datatype, buffer_rows, nullptr, pixelspace, linespace, bandspace)) {}
+            }
+        }
+    protected:
+        GDALDataset* _src;
+        GDALDataset* _dst;
+    };
+
+
 
 template<class BandOp, bool ColMajor = false>
 void BandMajor(GDALDataset* src, GDALDataset* dst, BandOp& op){
