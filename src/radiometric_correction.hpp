@@ -48,7 +48,16 @@ template <typename T> bool save(const char *filepath, T *data, size_t count, int
 
 using BufferOperator = ipf::BufferOperator;
 
-class PixelCorrection : public BufferOperator{
+class FrameIterator : public BufferOperator{
+ public:
+  bool operator()(void* data, int size[3], int space[3], int prior[3]) override{
+    for(int r=0; r<size[prior[2]]; ++r)
+      this->operator()(r, (char*)data+space[prior[2]], size[prior[0]], size[prior[1]]);
+  }
+  virtual bool operator()(int r, void* data, int cols, int rows) = 0;
+};
+
+class PixelCorrection : public FrameIterator{
  protected:
   int _cols;
   int _rows;
@@ -143,7 +152,7 @@ class NonUniformCorrection : public PixelCorrection{
   }
 };
 
-class BadPixelCorrection{
+class BadPixelCorrection : public FrameIterator{
  protected:
   cv::Mat _mask;
  public:
@@ -175,7 +184,7 @@ class BadPixelCorrection{
   }
 };
 
-class MedianBlur : public BufferOperator{
+class MedianBlur : public FrameIterator{
  private:
   int _ksize;
  public:
@@ -188,7 +197,7 @@ class MedianBlur : public BufferOperator{
   }
 };
 
-class MeanStdCalculator : public BufferOperator{
+class MeanStdCalculator : public FrameIterator{
  private:
   std::vector<double> _mean;
   std::vector<double> _std;
@@ -236,7 +245,7 @@ class MeanStdCalculator : public BufferOperator{
   }
 };
 
-class MedianCalculator : public BufferOperator{
+class MedianCalculator : public FrameIterator{
  public:
   typedef unsigned short DataType;
  private:
