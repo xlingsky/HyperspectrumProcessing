@@ -11,7 +11,7 @@
 #include "ipf.hpp"
 
 // #include <sstream>
-#define BADPIXEL_COUNTING
+//#define BADPIXEL_COUNTING
 
 namespace radiometric{
 
@@ -48,11 +48,32 @@ template <typename T> bool save(const char *filepath, T *data, size_t count, int
 
 using BufferOperator = ipf::BufferOperator;
 
+class ComboOperator : public BufferOperator {
+public:
+    virtual ~ComboOperator() {
+        for (auto& op : _ops)
+            delete op;
+        _ops.clear();
+    }
+    void Add(BufferOperator* op) {
+        _ops.push_back(op);
+    }
+    bool operator()(void* data, int size[3], int space[3], int prior[3]) override {
+        for (auto& op : _ops)
+            if (!op->operator()(data,size,space,prior)) return false;
+        return true;
+    }
+protected:
+    std::vector<BufferOperator*> _ops;
+};
+
 class FrameIterator : public BufferOperator{
  public:
   bool operator()(void* data, int size[3], int space[3], int prior[3]) override{
+      bool ret = true;
     for(int r=0; r<size[prior[2]]; ++r)
-      this->operator()(r, (char*)data+space[prior[2]], size[prior[0]], size[prior[1]]);
+        if (this->operator()(r, (char*)data + (size_t)space[prior[2]]*r, size[prior[0]], size[prior[1]])) {   }
+    return ret;
   }
   virtual bool operator()(int r, void* data, int cols, int rows) = 0;
 };
@@ -156,7 +177,7 @@ class BadPixelCorrection : public FrameIterator{
  protected:
   cv::Mat _mask;
  public:
-  typedef unsigned short DataType;
+  typedef float DataType;
   BadPixelCorrection(int cols, int , int bands) : _mask(cv::Mat::zeros(bands, cols, CV_8U)) {
   }
   bool load(const char* filepath){
@@ -172,7 +193,7 @@ class BadPixelCorrection : public FrameIterator{
     }
     return true;
   }
-  bool operator()(int r, DataType* data, int cols, int rows){
+  bool operator()(int r, void* data, int cols, int rows) override{
     assert(cols==_mask.cols);
     assert(rows==_mask.rows);
 
@@ -188,7 +209,7 @@ class MedianBlur : public FrameIterator{
  private:
   int _ksize;
  public:
-  typedef unsigned short DataType;
+  typedef float DataType;
   MedianBlur() : _ksize(5) {}
   bool operator()(int r, void *data, int cols, int rows) override {
     cv::Mat m(rows, cols, cv::DataType<DataType>::type, data);
@@ -197,13 +218,28 @@ class MedianBlur : public FrameIterator{
   }
 };
 
+class GaussianBlur : public FrameIterator {
+private:
+    int _ksize;
+    int _stband;
+public:
+    typedef float DataType;
+    GaussianBlur(int ksize, int stband) : _ksize(ksize), _stband(stband) {}
+    bool operator()(int r, void* data, int cols, int rows) override {
+        cv::Mat o(rows, cols, cv::DataType<DataType>::type, data);
+        cv::Mat m = o(cv::Rect(0, _stband, cols, rows - _stband));
+        cv::GaussianBlur(m, m, cv::Size(_ksize,_ksize), 0);
+        return true;
+    }
+};
+
 class MeanStdCalculator : public FrameIterator{
  private:
   std::vector<double> _mean;
   std::vector<double> _std;
   int _width;
  public:
-  typedef unsigned short DataType;
+  typedef float DataType;
   MeanStdCalculator(int w) : _width(w) {}
   std::pair<double, double> compute(DataType* data, int n){
     std::pair<double, double> ret = std::make_pair(0, 0);
@@ -247,7 +283,7 @@ class MeanStdCalculator : public FrameIterator{
 
 class MedianCalculator : public FrameIterator{
  public:
-  typedef unsigned short DataType;
+  typedef float DataType;
  private:
   std::vector<DataType> _median;
   int _width;

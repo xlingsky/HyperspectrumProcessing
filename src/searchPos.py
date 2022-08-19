@@ -81,4 +81,33 @@ def main(filepath):
 
     margin = 0.006
     poslist = load(filepath)
-    return searchRect(poslist, xmin-margin, xmax+margin, ymin-margin, ymax+margin)
+    sr = searchRect(poslist, xmin-margin, xmax+margin, ymin-margin, ymax+margin)
+    rr = rerange(sr)
+
+    outfile = os.path.splitext(filepath)[0]+'_aoi.txt'
+    with open(outfile,'w') as f:
+        f.write('{}\n'.format(len(rr)))
+        id = 1
+        for g in rr:
+            f.write('{} {}\n'.format(id, len(g)))
+            id+=1
+            for item in g:
+                f.write('{}\n'.format(item[0]))
+
+def loadStrips(filepath):
+    with open(filepath,'r') as f:
+        ret = list()
+        ls = f.readlines()
+        num_strip = int(ls[0].rstrip())
+        lid = 1
+        for i in range(num_strip):
+            strip = list()
+            info = ls[lid].split()
+            sid = info[0]
+            num_img = int(info[1])
+            lid+=1
+            strip.append(sid)
+            strip.append([ls[lid+x].rstrip() for x in range(num_img)])
+            lid+=num_img
+            ret.append(strip)
+        return ret

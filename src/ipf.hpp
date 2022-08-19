@@ -22,6 +22,7 @@ struct RasterPatch{
   GDALDataset* dataset;
   int win[6];
   RasterPatch() : dataset(nullptr){
+      memset(win, 0, sizeof(win));
   }
   void SetDataset(GDALDataset* d){
     dataset = d;
@@ -86,7 +87,7 @@ class Framework {
     return true;
   }
   virtual bool Preprocessing(void* data, int xoff, int yoff, int xsize, int ysize, int bandcount, int* bandlist, int xspace, int yspace, int bandspace){
-    if(_src.dataset&&_src.dataset->RasterIO(GF_Write, _src.win[0]+xoff, _src.win[2]+yoff, xsize, ysize, data, xsize, ysize, GetDataType(), bandcount, bandlist, xspace, yspace, bandspace) != CE_None)
+    if(_src.dataset&&_src.dataset->RasterIO(GF_Read, _src.win[0]+xoff, _src.win[2]+yoff, xsize, ysize, data, xsize, ysize, GetDataType(), bandcount, bandlist, xspace, yspace, bandspace) != CE_None)
       return false;
     return true;
   }

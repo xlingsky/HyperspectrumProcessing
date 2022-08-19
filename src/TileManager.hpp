@@ -11,10 +11,10 @@ class TileManager{
   using Seg = std::pair<IndexType, IndexType>;
   using SegContainer = std::vector<Seg>;
   using TileInfo = std::vector<Seg>;
-  static SegContainer Tiling(IndexType length, IndexType individual_length, IndexType overlap_length, bool merge_last_seg = true){
+  static SegContainer Tiling(IndexType length, IndexType individual_length, IndexType overlap_length, IndexType length_to_merge = 0){
     IndexType count = length/individual_length;
     if(count<1) count = 1;
-    if(!merge_last_seg && count*individual_length<length) ++count;
+    if((double)length-(double)count*individual_length > (double)length_to_merge) ++count;
     SegContainer segs(count);
     IndexType tile_size = individual_length+overlap_length;
     IndexType i=0;
@@ -29,8 +29,8 @@ class TileManager{
   }
   TileManager(){}
   virtual ~TileManager(){}
-  void AppendDimension(IndexType length, IndexType individual_length, IndexType overlap_length = 0, bool merge_last_seg = true){
-    _info.emplace_back(Tiling(length, individual_length, overlap_length, merge_last_seg));
+  void AppendDimension(IndexType length, IndexType individual_length, IndexType overlap_length = 0, IndexType length_to_merge = 0){
+    _info.emplace_back(Tiling(length, individual_length, overlap_length, length_to_merge));
     if(_accumulation.size()==0) _accumulation.push_back(_info.back().size());
     else _accumulation.push_back(_accumulation.back()*_info.back().size());
   }

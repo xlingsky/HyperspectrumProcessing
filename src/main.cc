@@ -6,6 +6,10 @@
 #include <iostream>
 
 #include <boost/algorithm/string/case_conv.hpp>
+#include <boost/property_tree/ptree.hpp>
+#include <boost/property_tree/xml_parser.hpp>
+#include <boost/foreach.hpp>
+#include <boost/algorithm/string.hpp>
 
 #include "pathadaptor.hpp"
 #include "gdalex.hpp"
@@ -16,8 +20,7 @@
 
 DEFINE_string(file, "", "image list");
 DEFINE_string(o,"", "output directory");
-DEFINE_string(r0,"", "file for factors: [dark level] or [nonuniform]");
-DEFINE_string(r1,"", "file for factors: [bad pixel] or [nonuniform]");
+DEFINE_string(task,"", "file for tasklist");
 DEFINE_int32(t,0x00C01509, "header tag");//0x0915C000
 DEFINE_int32(w, -1, "input image width");
 DEFINE_int32(b, -1, "input image bands");
@@ -25,7 +28,7 @@ DEFINE_int32(buffer, (100*1024*1024), "buffer size");
 DEFINE_int32(splice, 1, "unite images into one");
 DEFINE_string(m, "", "method for processing: mean or median");
 DEFINE_bool(f, false, "operator with force");
-DEFINE_string(ext, ".dat", "default extension for output decoded image");
+DEFINE_string(ext, ".tif", "default extension for output decoded image");
 DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
 
 bool IsRaw(boost::filesystem::path& file){
@@ -247,117 +250,93 @@ int main(int argc, char* argv[]){
       }
       HSP::Aux2Pos(path.string().c_str(), pospath.string().c_str());
       return 0;
-    }else{
-      char flag = 0;
-      if (!FLAGS_r0.empty()) {
-        if(!FLAGS_f&&boost::filesystem::exists(FLAGS_r0)) flag|=0x04;
-        else flag |= 0x01;
-      }
-      if (!FLAGS_r1.empty()) {
-        if(!FLAGS_f&&boost::filesystem::exists(FLAGS_r1)) flag|=0x08;
-        else flag |= 0x02;
-      }
-      if(flag>0){
+    }else if(!FLAGS_task.empty()){
+        boost::property_tree::ptree tree;
+        try {
+            boost::property_tree::read_xml(FLAGS_task, tree, boost::property_tree::xml_parser::trim_whitespace);
+        }
+        catch (const boost::property_tree::ptree_error& e) {
+            std::cerr << e.what() << std::endl;
+            return 2;
+        }
         GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
-        if(src==nullptr) return 1;
-        if (flag&0x03) {
-          if (flag & 0x01) {
-            enum Method{ Mean, Median};
-            Method m = FLAGS_m=="median"?Median:Mean;
-            if (verbose) {
-              std::cout << "[DarkLevel] method= " << (m==Mean?"mean":"median") << std::endl;
+        if (src == nullptr) return 1;
+        GDALDataset* dst = nullptr;
+        
+        ipf::Framework frame;
+        frame.SetDataType(GDT_Float32); frame.SetDataTypeSize(sizeof(float));
+        radiometric::ComboOperator* ops = new radiometric::ComboOperator;
+        int store_prior[3] = {0,2,1};
+        {
+            auto prior = tree.get<std::string>("decode.band_prior", "0,1,2");
+            auto boutput = tree.get<int>("decode.output", 1);
+            if (boutput) {
+                boost::filesystem::path outpath;
+                if (!FLAGS_o.empty()) outpath = FLAGS_o;
+                else {
+                    outpath = path;
+                    outpath.replace_extension();
+                    outpath += "_mod";
+                    outpath += path.extension();
+                }
+                dst = GDALCreate(outpath.string().c_str(), src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount(), src->GetRasterBand(1)->GetRasterDataType());
+                if (dst == nullptr) {
+                    GDALClose(src);
+                    return 1;
+                }
             }
-            switch (m) {
-              case Mean:{
-                radiometric::MeanStdCalculator op(src->GetRasterXSize());
-                ipf::BandMajor<radiometric::MeanStdCalculator, true>(src, op);
-                if (op.save(FLAGS_r0.c_str())) {
-                  if(verbose)
-                    std::cout << "[DarkLevel] save result to " << FLAGS_r0 << std::endl;
-                }else if(verbose)
-                  std::cout << "[DarkLevel] Save result FAILED" << std::endl;
-              }break;
-              case Median:{
-                radiometric::MedianCalculator op(src->GetRasterXSize());
-                ipf::BandMajor<radiometric::MedianCalculator, true>(src, op);
-                if (op.save(FLAGS_r0.c_str())) {
-                  if(verbose)
-                    std::cout << "[DarkLevel] save result to " << FLAGS_r0 << std::endl;
-                }else if(verbose)
-                  std::cout << "[DarkLevel] Save result FAILED" << std::endl;
-              }break;
+            std::vector<std::string> result;
+            boost::split(result, prior, boost::is_any_of(","));
+            if (result.size() == 3) {
+                store_prior[0] = std::stoi(result[0]);
+                store_prior[1] = std::stoi(result[1]);
+                store_prior[2] = std::stoi(result[2]);
+            }               
+        }
+    
+        BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("decode")) {
+            if (v.first != "task") continue;
+            auto name = v.second.get_child("<xmlattr>.name").get_value<std::string>();
+            if (name == "uniform") {
+                std::string a = v.second.get<std::string>("a");
+                std::string b = v.second.get<std::string>("b");
+                radiometric::NonUniformCorrection* op = new radiometric::NonUniformCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                if (!op->load(a.c_str(), b.c_str())) {
+                    std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
+                    return 1;
+                }
+                ops->Add(op);
             }
-          }
+            else if (name == "badpixel") {
+                std::string b = v.second.get<std::string>("file");
+                radiometric::BadPixelCorrection* op = new radiometric::BadPixelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                if (!op->load( b.c_str())) {
+                    std::cout << "ERROR:badpixel file not loaded a and b" << std::endl;
+                    return 1;
+                }
+                ops->Add(op);
+            }
+            else if (name == "gauss") {
+                int band = v.second.get<int>("band");
+                int ksize = v.second.get<int>("ksize");
+                radiometric::GaussianBlur* op = new radiometric::GaussianBlur(ksize, band);
+                ops->Add(op);
+            }
+        }
+        frame.SetSource(src);
+        if (dst) frame.SetDestination(dst);
+        int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount() };
+        {
+            size_t max_buffer_size = (size_t)1024 * 1024 * 1024;
+            buffer_size[store_prior[2]] = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
+            if (buffer_size[store_prior[2]] == 0) buffer_size[store_prior[2]] = 1;
+        }
+        frame.Apply(buffer_size, store_prior, ops);
 
-          GDALClose(src);
-          return 0;
-        }
-
-        boost::filesystem::path outpath;
-        if(!FLAGS_o.empty()) outpath = FLAGS_o;
-        else{
-          outpath = path;
-          outpath.replace_extension();
-          outpath += "_mod";
-          outpath += path.extension();
-        }
-        GDALDataset* dst = GDALCreate( outpath.string().c_str(), src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount(), src->GetRasterBand(1)->GetRasterDataType());
-        if(dst==nullptr){
-          GDALClose(src);
-          return 1;
-        }
-        flag = (flag>>2);
-        switch(flag){
-          case 1:{
-            radiometric::DarkLevelCorrection op(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount() );
-            if(op.load(FLAGS_r0.c_str())){
-              ipf::RowMajor(src, dst, op);
-              std::cout << "[DarkLevelCorrection] bad pixel num= " << op.max_bad_pixel_num() << "/" << src->GetRasterXSize()*src->GetRasterCount() << std::endl;
-            }
-          }; break;
-          case 2:{
-            radiometric::BadPixelCorrection op(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount() );
-            if(op.load(FLAGS_r1.c_str()))
-              ipf::RowMajor(src, dst, op);
-          }; break;
-          case 3:{
-            radiometric::NonUniformCorrection op(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount() );
-            if(op.load(FLAGS_r1.c_str(), FLAGS_r0.c_str())){
-              ipf::RowMajor(src, dst, op);
-              std::cout << "[NonUniformCorrection] bad pixel num= " << op.max_bad_pixel_num()<< "/" << src->GetRasterXSize()*src->GetRasterCount() << std::endl;
-            }
-          }; break;
-        }
+        delete ops;
         GDALClose(src);
-        GDALClose(dst);
+        if (dst) GDALClose(dst);
         return 0;
-      } else if (!FLAGS_m.empty()) {
-        GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
-        if(src==nullptr) return 1;
-        if (FLAGS_m == "median") {
-          boost::filesystem::path outpath;
-          if(!FLAGS_o.empty()) outpath = FLAGS_o;
-          else{
-            outpath = path;
-            outpath.replace_extension();
-            outpath += "_median";
-            outpath += path.extension();
-          }
-          GDALDataset* dst = GDALCreate( outpath.string().c_str(), src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount(), src->GetRasterBand(1)->GetRasterDataType());
-          if(dst==nullptr){
-            GDALClose(src);
-            return 1;
-          }
-          if(verbose)
-            std::cout << "[MedianBlur] Save to " << outpath.string() << std::endl;
-          radiometric::MedianBlur op;
-          ipf::BandMajor(src, dst, op);
-
-          GDALClose(dst);
-        }
-        GDALClose(src);
-        return 0;
-      }
     }
   }
 
