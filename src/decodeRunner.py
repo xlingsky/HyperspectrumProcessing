@@ -68,7 +68,8 @@ class decodeRunner:
                 strip.append(cutlist)
         with open(os.path.join(dstdir,'2_poscopy.bat'), 'w') as f:
             for strip in strips:
-                for pos in strip[1]:
+                for p in strip[1]:
+                    pos = os.path.splitext(p)[0]+'.aux'
                     name = strip[0]+'_'+os.path.basename(pos)
                     f.write('cp {} {}\n'.format(pos, os.path.join(dir_cut, name)))
         dir_strip = os.path.join(dstdir, '3_strip')
@@ -128,7 +129,8 @@ class decodeRunner:
                 strip.append(cutlist)
         with open(os.path.join(dstdir,'2_poscopy.bat'), 'w') as f:
             for strip in strips:
-                for pos in strip[1]:
+                for p in strip[1]:
+                    pos = os.path.splitext(p)[0]+'.aux'
                     name = strip[0]+'_'+os.path.basename(pos)
                     f.write('cp {} {}\n'.format(pos, os.path.join(dir_cut, name)))
         # dir_strip = os.path.join(dstdir, '3_strip')
