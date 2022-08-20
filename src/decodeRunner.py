@@ -123,35 +123,51 @@ class decodeRunner:
             for strip in strips:
                 cutlist = list()
                 for img in strip[2]:
-                    dstpath = os.path.join(dir_cut, os.path.basename(img[0]))
+                    dstpath = os.path.splitext(os.path.join(dir_cut, os.path.basename(img[0])))[0]+"_SW.tif"
                     f.write('{} {} {} {}\n'.format(hdr, img[2], img[0], dstpath))
                     cutlist.append(dstpath)
                 strip.append(cutlist)
-        with open(os.path.join(dstdir,'2_poscopy.bat'), 'w') as f:
+
+        dir_destripe = os.path.join(dstdir, '3_destripe')
+        if not os.path.exists(dir_destripe):
+            os.mkdir(dir_destripe)
+        tsk_destripe = os.path.join(dstdir,'3_destripe.bat')
+        destripe_exe = r'E:\xlingsky\repo\WHU-HyDenoise-GF5\WHU-HyDenoise-GF5.exe'
+        destripe_config = r'E:\xlingsky\repo\WHU-HyDenoise-GF5\GF5_AHSI.xml'
+        with open(tsk_destripe,'w') as f:
+            for strip in strips:
+                destripelist = list()
+                for img in strip[3]:
+                    dstpath = os.path.join(dir_destripe, os.path.basename(img))
+                    f.write('{} {} {} {}\n'.format(destripe_exe, img, destripe_config, dstpath))
+                    destripelist.append(dstpath)
+                strip.append(destripelist)
+
+        with open(os.path.join(dstdir,'3_poscopy.bat'), 'w') as f:
             for strip in strips:
                 for p in strip[1]:
                     pos = os.path.splitext(p)[0]+'.aux'
-                    name = strip[0]+'_'+os.path.basename(pos)
-                    f.write('cp {} {}\n'.format(pos, os.path.join(dir_cut, name)))
-        # dir_strip = os.path.join(dstdir, '3_strip')
-        # if not os.path.exists(dir_strip):
-        #     os.mkdir(dir_strip)
-        # dir_strip_tsk = os.path.join(dir_strip, 'tsk')
-        # if not os.path.exists(dir_strip_tsk):
-        #     os.mkdir(dir_strip_tsk)
-        # dir_strip_prod = os.path.join(dir_strip,'product')
-        # if not os.path.exists(dir_strip_prod):
-        #     os.mkdir(dir_strip_prod)
-        # tsk_strip = os.path.join(dstdir, '3_strip.bat')
-        # with open(tsk_strip,'w') as f:
-        #     for strip in strips:
-        #         imglist = os.path.join(dir_strip_tsk,'{}.txt'.format(strip[0]))
-        #         with open(imglist, 'w') as l:
-        #             for img in strip[3]:
-        #                 l.write('{}\n'.format(img))
-        #         fname = os.path.splitext(os.path.basename(strip[1][0]))[0]
-        #         lname = os.path.splitext(os.path.basename(strip[1][-1]))[0]
-        #         f.write('{} {} -o {}\n'.format(self._decode,imglist, os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)))
+                    name = strip[0]+'_'+os.path.splitext(os.path.basename(pos))[0]
+                    f.write('cp {} {}\n'.format(pos, os.path.join(dir_destripe, name+"_SW.aux")))
+        dir_strip = os.path.join(dstdir, '4_strip')
+        if not os.path.exists(dir_strip):
+            os.mkdir(dir_strip)
+        dir_strip_tsk = os.path.join(dir_strip, 'tsk')
+        if not os.path.exists(dir_strip_tsk):
+            os.mkdir(dir_strip_tsk)
+        dir_strip_prod = os.path.join(dir_strip,'product')
+        if not os.path.exists(dir_strip_prod):
+            os.mkdir(dir_strip_prod)
+        tsk_strip = os.path.join(dstdir, '4_strip.bat')
+        with open(tsk_strip,'w') as f:
+            for strip in strips:
+                imglist = os.path.join(dir_strip_tsk,'{}.txt'.format(strip[0]))
+                with open(imglist, 'w') as l:
+                    for img in strip[4]:
+                        l.write('{}\n'.format(img))
+                fname = os.path.splitext(os.path.basename(strip[1][0]))[0]
+                lname = os.path.splitext(os.path.basename(strip[1][-1]))[0]
+                f.write('{} {} -o {}_SW.tif\n'.format(self._decode,imglist, os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)))
 
     def splicing(self, srclist, taskfile, dstdir, ext='.dat'):
         with open(taskfile,'w') as f:
