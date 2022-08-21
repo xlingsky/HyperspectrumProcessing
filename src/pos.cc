@@ -24,11 +24,17 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
 
   if( sscanf(p+1, "%u%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf%*c%lf"
              , &rec.week, &rec.time
-             , rec.blh, rec.blh+1, rec.blh+2
-             , rec.vx, rec.vx+1, rec.vx+2
+             , rec.blh+1, rec.blh, rec.blh+2
+             , rec.vx+1, rec.vx, rec.vx+2
              , rec.a, rec.a+1, rec.a+2
              ) != 11){
     return false;
+  }
+
+  if (true) {
+      rec.a[0] *= (M_PI / 180);
+      rec.a[1] *= (M_PI / 180);
+      rec.a[2] *= (M_PI / 180);
   }
 
   return true;
@@ -37,7 +43,7 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
 bool MARKPOSA(const char* msg, HSP::Pos::record& rec){
   const char* p = strstr(msg, "SINGLE");
   if( sscanf(p+strlen("SINGLE"), "%*c%lf%*c%lf%*c%lf"
-             , rec.blh, rec.blh+1, rec.blh+2
+             , rec.blh+1, rec.blh, rec.blh+2
              ) != 3){
     return false;
   }
@@ -234,8 +240,8 @@ void Pos::Reprojection(){
   if(!_reprojector){
     double lon,lat;
     auto& item = _data.begin()->second;
-    lon = item.blh[1];
-    lat = item.blh[0];
+    lon = item.blh[0];
+    lat = item.blh[1];
     OGRSpatialReference srcSRS, dstSRS;
     srcSRS.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
     dstSRS.SetUTM(int((lon+180)/6)+1,lat>0);
@@ -267,7 +273,7 @@ void Pos::Reprojection(){
     auto& item = it->second;
     memcpy(item.x, item.blh, sizeof(double)*3);
     int valid;
-    GDALUseTransformer(_reprojector, 0, 1, item.x+1, item.x, item.x+2, &valid);
+    GDALUseTransformer(_reprojector, 0, 1, item.x, item.x+1, item.x+2, &valid);
     if (_offset[0] == 0) {
         _offset[0] = item.x[0];
         _offset[1] = item.x[1];
@@ -304,9 +310,9 @@ int Pos::GetPos(double lineid, double x[3], double a[3]){
 Eigen::Quaterniond Pos::GetQuaternion(double lineid){
   double a[3];
   GetAngle(lineid, a);
-  auto pitch = Eigen::AngleAxisd(a[1]*M_PI/180, Eigen::Vector3d::UnitY());
-  auto roll = Eigen::AngleAxisd(a[0]*M_PI/180, Eigen::Vector3d::UnitX());
-  auto yaw = Eigen::AngleAxisd(a[2]*M_PI/180, Eigen::Vector3d::UnitZ());
+  auto pitch = Eigen::AngleAxisd(a[1], Eigen::Vector3d::UnitX());
+  auto roll = Eigen::AngleAxisd(a[0], Eigen::Vector3d::UnitY());
+  auto yaw = Eigen::AngleAxisd(a[2], Eigen::Vector3d::UnitZ());
   return yaw*pitch*roll;
 }
 
@@ -347,6 +353,15 @@ int Pos::Check(){
   ra = GetAngle((it0->first+it1->first)/2, a);
 
   return 0;
+}
+
+int Pos::Cvt_BLH2Local(double x[3]) {
+    int valid;
+    GDALUseTransformer(_reprojector, 0, 1, x, x + 1, x + 2, &valid);
+    x[0] -= _offset[0];
+    x[1] -= _offset[1];
+    x[2] -= _offset[2];
+    return 1;
 }
 
 Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double, 3, Eigen::Dynamic>& im, const Eigen::Matrix<double, 4, 3>& plane_transformation) {
@@ -412,7 +427,12 @@ CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
   Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
   h.block<3, 3>(0,0) = pose.matrix().transpose();
   h.block<3, 1>(0,3) << -h.block<3, 3>(0, 0)*x;
-  return m*h;
+  Eigen::Matrix4d hcvt;
+  hcvt << -1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, -1, 0,
+      0, 0, 0, 1;
+  return m*hcvt*h;
 }
 
 void LinescanModel::test(const char* gcppath, const char* prjpath){
@@ -427,18 +447,23 @@ void LinescanModel::test(const char* gcppath, const char* prjpath){
   _pos->GetPosition(it1->first, c.data());
   auto pose = _pos->GetQuaternion(it1->first);
   Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
-  h.block<3, 3>(0, 0) = pose.matrix().transpose();
+  h.block<3, 3>(0, 0) = pose.matrix();
   h.block<3, 1>(0, 3) << -h.block<3, 3>(0, 0) * c;
-  auto y = h * c.homogeneous();
-  auto z = cam1 * y;
-  std::cout << z;
-  
+  Eigen::Matrix4d hcvt;
+  hcvt << -1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, -1, 0,
+      0, 0, 0, 1;
 
   Eigen::Matrix<double, 4, 1> x;
-  x << it2->second.x[0], it2->second.x[1], it2->second.x[2] - 1500, 1;
-  auto k = h*x;
-  auto im = (cam1 * x).hnormalized();
-  printf("(%lf,%lf)<->%d", im[0], im[1], it2->first);
+  _pos->GetPosition(it2->first, x.data());
+  x[2] -= 2000;
+  x[3] = 1;
+//  x << 101.974001, 38.62077165, 1901.699, 1;
+//  _pos->Cvt_BLH2Local(x.data());
+  Eigen::Vector4d k = hcvt*h*x;
+  Eigen::Vector2d imk = (cam1 * k).hnormalized();
+  Eigen::Vector2d imx = (cam1 * x).hnormalized();
 
   return;
   double gsd = std::fabs(it1->second.x[0]-it2->second.x[0])/((double)it2->first-it1->first);

@@ -43,6 +43,7 @@ class Pos{
   int GetAngle(double lineid, double a[3]);
   int GetPos(double lineid, double x[3], double a[3]);
   Eigen::Quaterniond GetQuaternion(double lineid);
+  int Cvt_BLH2Local(double x[3]);
  private:
   void Reprojection();
   void BuildInterpolator();

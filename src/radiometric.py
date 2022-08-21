@@ -54,12 +54,14 @@ def computeNonuniform(high_mean, low_mean, high_dn = None, low_dn = None):
 
     return a, b
 
-def moduleShift(imagepath, shift=548, yr=[0,2230]):
+def moduleShift(imagepath, shift=577, yr=[0,2230]):
     src = gdal.Open(imagepath)
     if src is None:
         return None
 
-    margin = 10
+    margin = 0
+    yr[0] = 0
+    yr[1] = src.RasterYSize-shift
 
     outpath = os.path.splitext(imagepath)[0]+"_shift.tif"
     driver = gdal.GetDriverByName('GTiff')
@@ -69,10 +71,10 @@ def moduleShift(imagepath, shift=548, yr=[0,2230]):
         ye = shift+yr[0]+yr[1]
         if ye > data.shape[0]:
             ye = data.shape[0]
-        dst.GetRasterBand(i).WriteRaster(  0,  0, 512,yr[1], data[shift+yr[0]:ye, 0:512])
-        dst.GetRasterBand(i).WriteRaster(512,  0, 512-margin,yr[1], data[yr[0]:yr[1],512+margin:1024])
-        dst.GetRasterBand(i).WriteRaster(1024-margin, 0, 512-margin,yr[1], data[shift+yr[0]:ye, 1024+margin:1536])
-        dst.GetRasterBand(i).WriteRaster(1536-2*margin, 0, 512,yr[1], data[yr[0]:yr[1],1536+margin:])
+        dst.GetRasterBand(i).WriteRaster(  0,  0, 512,yr[1], data[yr[0]:yr[1], 0:512])
+        dst.GetRasterBand(i).WriteRaster(512,  0, 512-margin,yr[1], data[shift+yr[0]:ye,512+margin:1024])
+        dst.GetRasterBand(i).WriteRaster(1024-margin, 0, 512-margin,yr[1], data[yr[0]:yr[1], 1024+margin:1536])
+        # dst.GetRasterBand(i).WriteRaster(1536-2*margin, 0, 512,yr[1], data[yr[0]:yr[1],1536+margin:])
 
     dst = None
     src = None
