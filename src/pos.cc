@@ -1,19 +1,37 @@
 #include "pos.h"
 #include "decode.h"
+#include "lx_geometry_rpc.h"
+#include "InterpolatorAdaptor.hpp"
 
+#include <gdal_priv.h>
 #include <gdal_alg.h>
 #include <gdal_alg_priv.h>
 #include <cpl_error.h>
 #include <ogr_spatialref.h>
 #include <ogr_srs_api.h>
+#include <vector>
 
 #include <eigen3/Eigen/Dense>
 
-#include <boost/math/interpolators/cubic_hermite.hpp>
-#include <boost/math/interpolators/pchip.hpp>
-
 #ifndef SRS_WKT_WGS84_LAT_LONG
 #define SRS_WKT_WGS84_LAT_LONG SRS_WKT_WGS84
+#endif
+
+#ifdef _DEBUG
+#include <boost/filesystem.hpp>
+#include <fstream>
+#include <iomanip>
+template<class DataIt>
+bool WriteVector(const char* filepath, DataIt first, DataIt last) {
+    std::ofstream file(filepath, std::ios::out);
+    file << std::setiosflags(std::ios::fixed);
+    while (first != last) {
+        file << std::setprecision(6) << *first << "\t";
+        ++first;
+    }
+    file.close();
+    return true;
+}
 #endif
 
 namespace PosParse{
@@ -63,41 +81,13 @@ bool Parse(const char* msg, HSP::Pos::record& rec){
 
 namespace HSP{
 
-typedef std::vector<double> ValueContainer;
-
-class InterpolatorBase {
- public:
-  typedef ValueContainer::value_type value_type;
-  virtual ~InterpolatorBase() {}
-  virtual value_type operator()(value_type x) const = 0;
-};
-
-class D1Interp : public InterpolatorBase, public boost::math::interpolators::pchip<ValueContainer>{
- public:
-  using Real = InterpolatorBase::value_type;
-  using Base = boost::math::interpolators::pchip<ValueContainer>;
-  using Container = ValueContainer;
-  D1Interp(Container&& abscissas, Container&& ordinates) : Base(std::move(abscissas),std::move(ordinates)) {}
-  Real operator()(Real x) const override{
-    return Base::operator()(x);
-  }
-};
-
-class D2Interp : public InterpolatorBase, public boost::math::interpolators::cubic_hermite<ValueContainer>{
- public:
-  using Real = InterpolatorBase::value_type;
-  using Base = boost::math::interpolators::cubic_hermite<ValueContainer>;
-  using Container = ValueContainer;
-  D2Interp(Container&& abscissas, Container&& ordinates, Container&& derivatives) : Base(std::move(abscissas),std::move(ordinates),std::move(derivatives)) {}
-  Real operator()(Real x) const override{
-    return Base::operator()(x);
-  }
-};
+    typedef pchip D1Interp;
+    typedef cubic_hermite D2Interp;
 
 class Interpolator{
  public:
-  InterpolatorBase* _x[3];
-  InterpolatorBase* _a[3];
+  InterpolatorAdaptor* _x[3];
+  InterpolatorAdaptor* _a[3];
  public:
   Interpolator() {
     _x[0] = _x[1] = _x[2] = nullptr;
@@ -364,6 +354,15 @@ int Pos::Cvt_BLH2Local(double x[3]) {
     return 1;
 }
 
+int Pos::Cvt_Local2BLH(double x[3]) {
+    x[0] += _offset[0];
+    x[1] += _offset[1];
+    x[2] += _offset[2];
+    int valid;
+    GDALUseTransformer(_reprojector, 1, 1, x, x + 1, x + 2, &valid);
+    return 1;
+}
+
 Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera, const Eigen::Matrix<double, 3, Eigen::Dynamic>& im, const Eigen::Matrix<double, 4, 3>& plane_transformation) {
     Eigen::Matrix<double, 3, 3> m = camera * plane_transformation;
     Eigen::Matrix<double, 3, Eigen::Dynamic> planex = m.inverse() * im;
@@ -425,14 +424,88 @@ CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
   _pos->GetPosition(linenumber, x.data());
   auto pose = _pos->GetQuaternion(linenumber);
   Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
-  h.block<3, 3>(0,0) = pose.matrix().transpose();
+  h.block<3, 3>(0,0) = pose.matrix();
   h.block<3, 1>(0,3) << -h.block<3, 3>(0, 0)*x;
   Eigen::Matrix4d hcvt;
-  hcvt << -1, 0, 0, 0,
+  hcvt << 1, 0, 0, 0,
       0, 1, 0, 0,
       0, 0, -1, 0,
       0, 0, 0, 1;
   return m*hcvt*h;
+}
+
+std::vector<double> GenerateSample(double range[2], int num) {
+    std::vector<double> samps;
+    double interval = (range[1] - range[0]) / (num-1);
+    for (int i = 0; i < num; ++i)
+        samps.push_back(range[0] + i * interval);
+    return samps;
+}
+
+bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath) {
+    std::vector<double> samp1d =  GenerateSample(range_samp, 3);
+    std::vector<double> height1d; height1d.push_back((range_height[0]+range_height[1])/2);// = GenerateSample(range_height, 3);
+    std::vector<double> line1d; 
+    auto& posdata = _pos->_data;
+    for (auto& pos : posdata)
+        if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
+    for (auto& h : height1d)
+        h -= _pos->_offset[2];
+    size_t count = samp1d.size() * line1d.size() * height1d.size();
+    std::vector<double> grid_samp, grid_line, grid_height, grid_lon, grid_lat;
+	grid_samp.reserve(count), grid_line.reserve(count), grid_height.reserve(count), grid_lon.reserve(count), grid_lat.reserve(count);
+    for (auto& l : line1d) {
+        auto cam = CameraMatrix(l);
+		for (auto& h : height1d) {
+            Eigen::Matrix<double, 4, 1> height_plane;
+            height_plane << 0, 0, 1, -h;
+			for (auto& s : samp1d) {
+                grid_samp.push_back(s);
+                grid_line.push_back(l);
+                Eigen::Matrix<double, 3, 1> im;
+                im << s, 0, 1;
+                Eigen::Matrix<double,4,1> t = BackProjectionToPlane(cam, im, height_plane); 
+                Eigen::Matrix<double, 3, 1> x = t.hnormalized();
+                _pos->Cvt_Local2BLH(x.data());
+                grid_lon.push_back(x[0]);
+                grid_lat.push_back(x[1]);
+                grid_height.push_back(x[2]);
+            }
+        }
+    }
+#ifdef _DEBUG
+    char debug_path[512] = "H:\\jinchang\\ws\\vnir\\debug\\" ;
+    char* ps = debug_path + strlen(debug_path);
+    strcpy(ps, "samp.txt");
+    WriteVector(debug_path, grid_samp.begin(), grid_samp.end());
+    strcpy(ps, "line.txt");
+    WriteVector(debug_path, grid_line.begin(), grid_line.end());
+    strcpy(ps, "lon.txt");
+    WriteVector(debug_path, grid_lon.begin(), grid_lon.end());
+    strcpy(ps, "lat.txt");
+    WriteVector(debug_path, grid_lat.begin(), grid_lat.end());
+    strcpy(ps, "height.txt");
+    WriteVector(debug_path, grid_height.begin(), grid_height.end());
+#endif
+    GDALDataset* src = (GDALDataset*)GDALOpen(rpcpath, GA_Update);
+    GDAL_GCP* pasGCPs = new GDAL_GCP[count];
+    GDALInitGCPs(count, pasGCPs);
+    for (int i = 0; i < count; ++i) {
+        pasGCPs[i].dfGCPPixel= grid_samp[i];
+        pasGCPs[i].dfGCPLine = grid_line[i];
+        pasGCPs[i].dfGCPX = grid_lon[i];
+        pasGCPs[i].dfGCPY = grid_lat[i];
+        pasGCPs[i].dfGCPZ = grid_height[i];
+    }
+	src->SetGCPs(count, pasGCPs, SRS_WKT_WGS84_LAT_LONG);
+    GDALDeinitGCPs(count, pasGCPs);
+    delete[] pasGCPs;
+    
+    return true;
+    xlingeo::Rpc rpc;
+    rpc.Solve(grid_samp.data(), grid_line.data(), grid_lat.data(), grid_lon.data(), grid_height.data(), grid_samp.size());
+    rpc.Save(rpcpath);
+    return true;
 }
 
 void LinescanModel::test(const char* gcppath, const char* prjpath){
@@ -450,7 +523,7 @@ void LinescanModel::test(const char* gcppath, const char* prjpath){
   h.block<3, 3>(0, 0) = pose.matrix();
   h.block<3, 1>(0, 3) << -h.block<3, 3>(0, 0) * c;
   Eigen::Matrix4d hcvt;
-  hcvt << -1, 0, 0, 0,
+  hcvt << 1, 0, 0, 0,
       0, 1, 0, 0,
       0, 0, -1, 0,
       0, 0, 0, 1;

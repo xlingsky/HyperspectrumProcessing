@@ -36,14 +36,14 @@ class Pos{
   ~Pos();
   bool load(const char* filepath);
   size_t size() const { return _data.size(); }
-  record& front() { return _data.begin()->second; }
-  record& back() { return  _data.rbegin()->second; }
+  std::map<int, record>& data() { return _data; }
   void test();
   int GetPosition(double lineid, double x[3]);
   int GetAngle(double lineid, double a[3]);
   int GetPos(double lineid, double x[3], double a[3]);
   Eigen::Quaterniond GetQuaternion(double lineid);
   int Cvt_BLH2Local(double x[3]);
+  int Cvt_Local2BLH(double x[3]);
  private:
   void Reprojection();
   void BuildInterpolator();
@@ -95,6 +95,7 @@ class LinescanModel{
     _camera = cam;
   }
   CameraMatrixType CameraMatrix(double linenumber) const;
+  bool GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath);
   void test( const char* gcppath, const char* prjpath);
 };
 

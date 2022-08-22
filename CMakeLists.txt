@@ -27,6 +27,7 @@ set(decode
   src/decode.cc
   src/bigfileio.cc
   src/pos.cc
+  src/lx_geometry_rpc.cc
   )
 
 add_executable(decode ${decode})

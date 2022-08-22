@@ -30,6 +30,7 @@ DEFINE_string(m, "", "method for processing: mean or median");
 DEFINE_bool(f, false, "operator with force");
 DEFINE_string(ext, ".tif", "default extension for output decoded image");
 DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
+DEFINE_string(gcp, "", "pos to add gcp to tif");
 
 bool IsRaw(boost::filesystem::path& file){
   std::string ext;
@@ -80,8 +81,8 @@ std::vector< std::vector<std::string> > Group(std::vector<std::string>& list){
       else{
         SegFrm seg;
         seg.id = i;
-        seg.st = pos.front().frame;
-        seg.ed = pos.back().frame;
+        seg.st = pos.data().begin()->second.frame;
+        seg.ed = pos.data().rbegin()->second.frame;
         segs.insert(seg);
       }
     }
@@ -235,19 +236,6 @@ int main(int argc, char* argv[]){
     if(path.extension() == ".aux"){
       auto pospath = path;
       pospath.replace_extension(".pos");
-      {
-        HSP::Pos pos;
-        pos.load(path.string().c_str());
-        HSP::PinholeCamera cam;
-        cam.Load("G:\\jincang\\camera_vnir.txt");
-        HSP::LinescanModel model;
-        model.SetCamera(&cam);
-        model.SetPos(&pos);
-        boost::filesystem::path gcppath = path; gcppath.replace_extension(".gcp");
-        boost::filesystem::path prjpath = path; prjpath.replace_extension(".prj");
-        model.test(gcppath.string().c_str(), prjpath.string().c_str());
-        return 0;
-      }
       HSP::Aux2Pos(path.string().c_str(), pospath.string().c_str());
       return 0;
     }else if(!FLAGS_task.empty()){
@@ -336,6 +324,21 @@ int main(int argc, char* argv[]){
         delete ops;
         GDALClose(src);
         if (dst) GDALClose(dst);
+        return 0;
+    } else if (!FLAGS_gcp.empty()) {
+        HSP::Pos pos;
+        pos.load(FLAGS_gcp.c_str());
+        HSP::PinholeCamera cam;
+        cam.Load("G:\\jincang\\camera_swir.txt");
+        HSP::LinescanModel model;
+        model.SetCamera(&cam);
+        model.SetPos(&pos);
+//        boost::filesystem::path rpcpath(path);
+//        rpcpath.replace_extension(".rpc");
+        double range_samp[] = {10, 1520};
+        double range_line[] = {8, pos.data().rbegin()->first-8};
+        double range_height[] = {1500, 3000};
+        model.GenerateRPC(range_samp, range_line, range_height, path.string().c_str());
         return 0;
     }
   }

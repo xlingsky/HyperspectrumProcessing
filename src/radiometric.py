@@ -1,6 +1,7 @@
 import numpy as np
 from osgeo import gdal
 import os
+import sys
 
 def getFilePath(dirpath, filename):
     if os.path.exists(filename):
@@ -135,3 +136,6 @@ def main():
 
     np.savetxt('/Volumes/data/20220525/863FEIXIN/nonuniform_a.txt', a)
     np.savetxt('/Volumes/data/20220525/863FEIXIN/nonuniform_b.txt', b)
+    
+if __name__ == "__main__":
+   moduleShift(sys.argv[1]);
