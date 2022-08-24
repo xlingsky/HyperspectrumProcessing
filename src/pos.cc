@@ -445,10 +445,10 @@ std::vector<double> GenerateSample(double range[2], int num) {
 bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath) {
     std::vector<double> samp1d =  GenerateSample(range_samp, 3);
     std::vector<double> height1d; height1d.push_back((range_height[0]+range_height[1])/2);// = GenerateSample(range_height, 3);
-    std::vector<double> line1d; 
-    auto& posdata = _pos->_data;
-    for (auto& pos : posdata)
-        if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
+    std::vector<double> line1d = GenerateSample(range_line, 100);
+//    auto& posdata = _pos->_data;
+//    for (auto& pos : posdata)
+//        if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
     for (auto& h : height1d)
         h -= _pos->_offset[2];
     size_t count = samp1d.size() * line1d.size() * height1d.size();

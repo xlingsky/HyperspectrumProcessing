@@ -250,27 +250,24 @@ int main(int argc, char* argv[]){
         GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
         if (src == nullptr) return 1;
         GDALDataset* dst = nullptr;
+        int dst_cols = src->GetRasterXSize();
+        int dst_rows = src->GetRasterYSize();
+        int dst_bands = src->GetRasterCount();
         
-        ipf::Framework frame;
-        frame.SetDataType(GDT_Float32); frame.SetDataTypeSize(sizeof(float));
         radiometric::ComboOperator* ops = new radiometric::ComboOperator;
+        ipf::RasterOperator frame( ops,GDT_Float32);
         int store_prior[3] = {0,2,1};
+		boost::filesystem::path outpath;
         {
             auto prior = tree.get<std::string>("decode.band_prior", "0,1,2");
-            auto boutput = tree.get<int>("decode.output", 1);
+            int boutput = tree.get<int>("decode.output", 1);
             if (boutput) {
-                boost::filesystem::path outpath;
                 if (!FLAGS_o.empty()) outpath = FLAGS_o;
                 else {
                     outpath = path;
                     outpath.replace_extension();
                     outpath += "_mod";
                     outpath += path.extension();
-                }
-                dst = GDALCreate(outpath.string().c_str(), src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount(), src->GetRasterBand(1)->GetRasterDataType());
-                if (dst == nullptr) {
-                    GDALClose(src);
-                    return 1;
                 }
             }
             std::vector<std::string> result;
@@ -280,6 +277,7 @@ int main(int argc, char* argv[]){
                 store_prior[1] = std::stoi(result[1]);
                 store_prior[2] = std::stoi(result[2]);
             }               
+            frame.SetStoreOrder(store_prior);
         }
     
         BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("decode")) {
@@ -310,20 +308,74 @@ int main(int argc, char* argv[]){
                 radiometric::GaussianBlur* op = new radiometric::GaussianBlur(ksize, band);
                 ops->Add(op);
             }
+            else if (name == "interp" && !outpath.empty()) {
+                std::vector<double> wl_old, wl_new;
+                radiometric::BandInterpolator::InterpType type;
+                {
+					std::string w0 = v.second.get<std::string>("wl0");
+					std::string w1 = v.second.get<std::string>("wl1");
+
+					std::vector<std::string> result;
+					boost::split(result, w0, boost::is_any_of(", ;"));
+                    for (auto& r : result)
+                        wl_old.push_back(std::stod(r));
+					boost::split(result, w1, boost::is_any_of(", ;"));
+                    for (auto& r : result)
+                        wl_new.push_back(std::stod(r));
+                    if (wl_old.size() != src->GetRasterCount()) {
+                        std::cout << "ERROR: interp wl length MISMATCH" << std::endl;
+						GDALClose(src);
+						return 1;
+                    }
+
+					std::string t = v.second.get<std::string>("type", "pchip");
+                    if (t == "spline_cubic")
+                        type = radiometric::BandInterpolator::BSPLINE_CUBIC;
+                    else if(t=="spline_quintic")
+                        type = radiometric::BandInterpolator::BSPLINE_QUINTIC;
+                    else if(t=="spline_quadratic")
+                        type = radiometric::BandInterpolator::BSPLINE_QUADRATIC;
+                    else if(t=="makima")
+                        type = radiometric::BandInterpolator::MAKIMA;
+                    else if(t=="barycentric")
+                        type = radiometric::BandInterpolator::BARYCENTRIC;
+                    else
+                        type = radiometric::BandInterpolator::PCHIP;
+                }
+                dst_bands = wl_new.size();
+                radiometric::BandInterpolator* op = new radiometric::BandInterpolator(std::move(wl_old), std::move(wl_new));
+                op->SetInterpType(type);
+                ops->Add(op);
+            }
+        }
+        if (!outpath.empty()) {
+			dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows, dst_bands, src->GetRasterBand(1)->GetRasterDataType());
+			if (dst == nullptr) {
+				GDALClose(src);
+				return 1;
+			}
         }
         frame.SetSource(src);
         if (dst) frame.SetDestination(dst);
-        int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount() };
+        int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()>dst_bands?src->GetRasterCount():dst_bands};
         {
             size_t max_buffer_size = (size_t)1024 * 1024 * 1024;
             buffer_size[store_prior[2]] = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
             if (buffer_size[store_prior[2]] == 0) buffer_size[store_prior[2]] = 1;
         }
-        frame.Apply(buffer_size, store_prior, ops);
+		frame.ReserveBufferSize((size_t)buffer_size[0] * buffer_size[1] * buffer_size[2]);
+        if (src->GetRasterCount() < buffer_size[2])  buffer_size[2] = src->GetRasterCount();
+        ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
 
         delete ops;
+        if (dst) {
+            double aop6[6];
+            if(src->GetGeoTransform(aop6)==CE_None)
+                dst->SetGeoTransform(aop6);
+            dst->SetProjection(src->GetProjectionRef());
+            GDALClose(dst);
+        }
         GDALClose(src);
-        if (dst) GDALClose(dst);
         return 0;
     } else if (!FLAGS_gcp.empty()) {
         HSP::Pos pos;
@@ -337,7 +389,7 @@ int main(int argc, char* argv[]){
 //        rpcpath.replace_extension(".rpc");
         double range_samp[] = {10, 1520};
         double range_line[] = {8, pos.data().rbegin()->first-8};
-        double range_height[] = {1500, 3000};
+        double range_height[] = {1500, 2500};
         model.GenerateRPC(range_samp, range_line, range_height, path.string().c_str());
         return 0;
     }

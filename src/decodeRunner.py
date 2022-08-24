@@ -1,6 +1,7 @@
 import os
 from osgeo import gdal
 import numpy as np
+import copy
 
 def getFilePath(dirpath, filename):
     if os.path.exists(filename):
@@ -32,10 +33,12 @@ class decodeRunner:
                 return True
         return False
 
-    def vnir(self, strips, dstdir = r'H:\jinchang\ws\vnir'):
+    def vnir(self, src, dstdir = r'H:\jinchang\ws\vnir'):
+        strips = copy.deepcopy(src)
         config_radiometric = r'D:\jinchang\config\vnir\radiometric.xml'
         dir_radiometric = os.path.join(dstdir, '1_radio')
-        xrange= [300, 1649]
+        xrange= [0, 1535]
+        # xrange= [300, 1649]
         if not os.path.exists(dir_radiometric):
             os.mkdir(dir_radiometric)
         tsk_radiometric = os.path.join(dstdir, '1_radio.bat')
@@ -50,7 +53,8 @@ class decodeRunner:
                     if not dataset:
                         print('NOT FOUND {}\n'.format(img))
                         continue
-                    f.write('{} -task {} {} -o {}\n'.format(self._decode, config_radiometric, img, dstpath))
+                    # f.write('{} -task {} {} -o {}\n'.format(self._decode, config_radiometric, img, dstpath))
+                    f.write('gdal_translate -b 50 {} {}\n'.format(img, dstpath))
                     radiolist.append([dstpath, dataset.RasterXSize, dataset.RasterYSize])
                 strip.append(radiolist)
         dir_cut = os.path.join(dstdir, '2_cut')
@@ -90,7 +94,21 @@ class decodeRunner:
                         l.write('{}\n'.format(img))
                 fname = os.path.splitext(os.path.basename(strip[1][0]))[0]
                 lname = os.path.splitext(os.path.basename(strip[1][-1]))[0]
-                f.write('{} {} -o {}.tif\n'.format(self._decode,imglist, os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)))
+                dstpath = os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)+'.tif'
+                f.write('{} {} -o {}\n'.format(self._decode,imglist, dstpath))
+                strip.append(dstpath)
+        tsk_gcp = os.path.join(dstdir, "4_gcp.bat")
+        with open(tsk_gcp,'w') as f:
+            for strip in strips:
+                f.write('{} -gcp {} {}\n'.format(self._decode, os.path.splitext(strip[4])[0]+".aux", strip[4]))
+        tsk_warp = os.path.join(dstdir, "5_warp.bat")
+        dir_warp = os.path.join(dstdir,'geo')
+        if not os.path.exists(dir_warp):
+            os.mkdir(dir_warp)
+        with open(tsk_warp,'w') as f:
+            for i,strip in enumerate(strips):
+                dstpath = os.path.join(dir_warp,os.path.basename(strip[4]))
+                f.write('gdalwarp {} {}\n'.format( strip[4], dstpath))
 
 
     def swir(self, strips, dstdir = r'D:\jinchang\ws\swir'):

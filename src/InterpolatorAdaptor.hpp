@@ -53,9 +53,12 @@ INTERPOLATOR_SPLINE(cardinal_cubic_b_spline);
 INTERPOLATOR_SPLINE(cardinal_quintic_b_spline);
 INTERPOLATOR_SPLINE(cardinal_quadratic_b_spline);
 INTERPOLATOR_WITHOUT_DERIVATIVES(pchip);
-INTERPOLATOR_WITHOUT_DERIVATIVES(barycentric_rational);
 INTERPOLATOR_WITHOUT_DERIVATIVES(makima);
 INTERPOLATOR_WITH_DERIVATIVES(cubic_hermite);
+
+BEGIN_INTERPOLATOR_DERIVED_CLASS(barycentric_rational, InterpolatorAdaptor::value_type)
+barycentric_rational(ValueContainer&& x, ValueContainer&& y, size_t order = 3) : Base(std::move(x), std::move(y), order) {}
+END_INTERPOLATOR_DERIVED_CLASS(barycentric_rational, InterpolatorAdaptor::value_type);
 
 };
 

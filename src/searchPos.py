@@ -74,12 +74,12 @@ def check(items, pt):
     return ret
 
 def main(filepath):
-    xmin = 101.748
-    xmax = 101.902
-    ymin = 38.551
-    ymax = 38.589
+    xmin = 101.5667#101.748
+    xmax = 102.05#101.902
+    ymin = 38.46667#38.551
+    ymax = 38.7#38.589
 
-    margin = 0.006
+    margin = 0.003
     poslist = load(filepath)
     sr = searchRect(poslist, xmin-margin, xmax+margin, ymin-margin, ymax+margin)
     rr = rerange(sr)
@@ -94,7 +94,7 @@ def main(filepath):
             for item in g:
                 f.write('{}\n'.format(item[0]))
 
-def loadStrips(filepath):
+def loadStrips(filepath, minnum=50):
     with open(filepath,'r') as f:
         ret = list()
         ls = f.readlines()
@@ -109,5 +109,7 @@ def loadStrips(filepath):
             strip.append(sid)
             strip.append([ls[lid+x].rstrip() for x in range(num_img)])
             lid+=num_img
+            if num_img < minnum:
+                continue
             ret.append(strip)
         return ret

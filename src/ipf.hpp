@@ -30,78 +30,111 @@ struct RasterPatch{
   }
   void SetWin(int xoff, int xsize, int yoff, int ysize, int bandoff, int bandsize){
     win[0] = xoff;
-    win[1] = xsize;
-    win[2] = yoff;
-    win[3] = ysize;
-    win[4] = bandoff;
+    win[1] = yoff;
+    win[2] = bandoff;
+    win[3] = xsize;
+    win[4] = ysize;
     win[5] = bandsize;
   }
 };
 
-class Framework {
- public:
-  Framework() : _datatype(GDT_Byte), _datatype_size(sizeof(unsigned char)) {
-  }
-  virtual ~Framework() {}
-  void SetDataType(GDALDataType datatype) { _datatype = datatype; }
-  void SetDataTypeSize(int size) { _datatype_size = size; }
-  int GetDataTypeSize() const { return _datatype_size; }
-  GDALDataType GetDataType() const { return _datatype; }
-
+class RasterOperator {
+public:
+    using DimSeg = xlingsky::TileManager::Seg;
+protected:
+  RasterPatch _src;
+  RasterPatch _dst;
+  GDALDataType _datatype;
+  std::vector<char> _buffer;
+  std::vector<int> _bandlist;
+  int _storeorder[3];
+  DimSeg _seg[3];
+  BufferOperator* _op;
+public:
+    RasterOperator(BufferOperator* op, GDALDataType datatype = GDT_Byte) : _op(op), _datatype(datatype) {
+        _storeorder[0] = 0;
+        _storeorder[1] = 2;
+        _storeorder[2] = 1;
+    }
+    void SetStoreOrder(int* order) {
+        memcpy(_storeorder, order, sizeof(_storeorder));
+    }
+    void ReserveBufferSize(size_t size) {
+        _buffer.resize(size*GetDataTypeSize());
+    }
+    int GetDataTypeSize() const {
+        return GDALGetDataTypeSizeBytes(_datatype);
+    }
   void SetSource(GDALDataset* src){
     _src.SetDataset(src);
   }
   void SetDestination(GDALDataset* dst){
     _dst.SetDataset(dst);
   }
-
-  bool Apply(int buffer_size[3], int store_prior[3], BufferOperator* op) {
-    xlingsky::TileManager manager;
-    using Seg = xlingsky::TileManager::Seg;
-    for(int i=0; i<3; ++i)
-      manager.AppendDimension(_src.win[2*i+1], buffer_size[i]);
-    std::vector<char> buffer((size_t)buffer_size[0]*buffer_size[1]*buffer_size[2]*_datatype_size);
-    int store_space[3];
-    Seg segs[3];
-
-    for(int b=0; b<manager.Size(2); ++b){
-      segs[2] = manager.Segment(2, b);
-      std::vector<int> bandlist(segs[2].second);
-      std::iota(bandlist.begin(), bandlist.end(), _src.win[4]+segs[2].first);
-      for(int r=0; r<manager.Size(1); ++r){
-        segs[1] = manager.Segment(1, r);
-        for(int c=0; c<manager.Size(0); ++c){
-          segs[0] = manager.Segment(0, c);
-          store_space[store_prior[0]] = _datatype_size;
-          store_space[store_prior[1]] = _datatype_size*segs[store_prior[0]].second;
-          store_space[store_prior[2]] = store_space[store_prior[1]]*segs[store_prior[1]].second;
-          if(Preprocessing(&buffer[0], segs[0].first, segs[1].first, segs[0].second, segs[1].second, segs[2].second, &bandlist[0], store_space[0], store_space[1], store_space[2])){
-            int store_size[3] = {segs[0].second, segs[1].second, segs[2].second};
-            if(op->operator()(&buffer[0], store_size, store_space, store_prior)){
-              Postprocessing(&buffer[0], segs[0].first, segs[1].first, segs[0].second, segs[1].second, segs[2].second, &bandlist[0], store_space[0], store_space[1], store_space[2]);
-            }
-          }
-        }
+  RasterPatch& source() { return _src; }
+  RasterPatch& destination() { return _dst; }
+  bool Begin(DimSeg& seg, int dim) {
+      _seg[dim] = seg;
+      if (dim == 2) {
+          _bandlist.resize(seg.second);
+		  std::iota(_bandlist.begin(), _bandlist.end(), _src.win[2] + seg.first);
       }
+      return true;
+  }
+  bool End(DimSeg& seg, int dim) {
+      return true;
+  }
+  bool Apply() {
+	  int store_space[3];
+	  store_space[_storeorder[0]] = GetDataTypeSize();
+	  store_space[_storeorder[1]] = GetDataTypeSize()*_seg[_storeorder[0]].second;
+	  store_space[_storeorder[2]] = store_space[_storeorder[1]] * _seg[_storeorder[1]].second;
+    if(_src.dataset&&_src.dataset->RasterIO(GF_Read,
+        _src.win[0]+_seg[0].first, _src.win[1]+_seg[1].first, _seg[0].second, _seg[1].second,
+        &_buffer[0], _seg[0].second, _seg[1].second, _datatype, _seg[2].second, &_bandlist[0],
+        store_space[0], store_space[1], store_space[2]) == CE_None) {
+		  int store_size[3] = { _seg[0].second, _seg[1].second, _seg[2].second };
+		  if (_op->operator()(&_buffer[0], store_size, store_space, _storeorder)) {
+			  if (_dst.dataset ) {
+				  int* dst_bandlist = nullptr;
+                  if (store_size[2] != _seg[2].second) {
+                      dst_bandlist = new int[store_size[2]];
+					  std::iota(dst_bandlist, dst_bandlist+store_size[2], _dst.win[2] + _seg[2].first);
+                  }
+				  if (_dst.dataset->RasterIO(GF_Write,
+					  _dst.win[0] + _seg[0].first, _dst.win[1] + _seg[1].first, store_size[0], store_size[1],
+					  &_buffer[0], store_size[0], store_size[1], _datatype, store_size[2], dst_bandlist?dst_bandlist:&_bandlist[0],
+					  store_space[0], store_space[1], store_space[2]) == CE_None) {
+				  }
+				  if (dst_bandlist) delete[] dst_bandlist;
+			  }
+		  }
+	  }
+    return true;
+  }
+};
+
+template<class Operator>
+bool DimProcessing(xlingsky::TileManager& manager, Operator* op, int dim) {
+    for (int i = 0; i < manager.Size(dim); ++i) {
+        auto seg = manager.Segment(dim, i);
+        op->Begin(seg, dim);
+        if (dim == 0) op->Apply();
+        else DimProcessing(manager, op, dim-1);
+        op->End(seg, dim);
     }
     return true;
-  }
-  virtual bool Preprocessing(void* data, int xoff, int yoff, int xsize, int ysize, int bandcount, int* bandlist, int xspace, int yspace, int bandspace){
-    if(_src.dataset&&_src.dataset->RasterIO(GF_Read, _src.win[0]+xoff, _src.win[2]+yoff, xsize, ysize, data, xsize, ysize, GetDataType(), bandcount, bandlist, xspace, yspace, bandspace) != CE_None)
-      return false;
+}
+
+template<class Operator, int dims = 3>
+bool TileProcessing(int win_size[], int buffer_size[], Operator* op) {
+    xlingsky::TileManager manager;
+    using Seg = xlingsky::TileManager::Seg;
+    for(int i=0; i<dims; ++i)
+      manager.AppendDimension(win_size[i], buffer_size[i]);
+    DimProcessing(manager, op, dims-1);
     return true;
-  }
-  virtual bool Postprocessing(void* data, int xoff, int yoff, int xsize, int ysize, int bandcount, int* bandlist, int xspace, int yspace, int bandspace){
-    if(_dst.dataset&&_dst.dataset->RasterIO(GF_Write, _dst.win[0]+xoff, _dst.win[2]+yoff, xsize, ysize, data, xsize, ysize, GetDataType(), bandcount, bandlist, xspace, yspace, bandspace) != CE_None)
-      return false;
-    return true;
-  }
- protected:
-  int _datatype_size;
-  GDALDataType _datatype;
-  RasterPatch _src;
-  RasterPatch _dst;
-};
+}
 
 template<class TileOp>
 void Tile(int width, int height, int tilesize, int margin, TileOp& op){
