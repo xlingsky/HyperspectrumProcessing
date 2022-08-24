@@ -257,27 +257,19 @@ int main(int argc, char* argv[]){
         radiometric::ComboOperator* ops = new radiometric::ComboOperator;
         ipf::RasterOperator frame( ops,GDT_Float32);
         int store_prior[3] = {0,2,1};
+        int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()};
 		boost::filesystem::path outpath;
+        int boutput = 0;
         {
             auto prior = tree.get<std::string>("decode.band_prior", "0,1,2");
-            int boutput = tree.get<int>("decode.output", 1);
-            if (boutput) {
-                if (!FLAGS_o.empty()) outpath = FLAGS_o;
-                else {
-                    outpath = path;
-                    outpath.replace_extension();
-                    outpath += "_mod";
-                    outpath += path.extension();
-                }
-            }
-            std::vector<std::string> result;
-            boost::split(result, prior, boost::is_any_of(","));
-            if (result.size() == 3) {
-                store_prior[0] = std::stoi(result[0]);
-                store_prior[1] = std::stoi(result[1]);
-                store_prior[2] = std::stoi(result[2]);
-            }               
-            frame.SetStoreOrder(store_prior);
+            int boutput = tree.get<int>("decode.output", 0);
+			std::vector<std::string> result;
+			boost::split(result, prior, boost::is_any_of(","));
+			if (result.size() == 3) {
+				store_prior[0] = std::stoi(result[0]);
+				store_prior[1] = std::stoi(result[1]);
+				store_prior[2] = std::stoi(result[2]);
+			}
         }
     
         BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("decode")) {
@@ -292,6 +284,7 @@ int main(int argc, char* argv[]){
                     return 1;
                 }
                 ops->Add(op);
+                boutput = 1;
             }
             else if (name == "badpixel") {
                 std::string b = v.second.get<std::string>("file");
@@ -301,12 +294,39 @@ int main(int argc, char* argv[]){
                     return 1;
                 }
                 ops->Add(op);
+                boutput = 1;
             }
             else if (name == "gauss") {
                 int band = v.second.get<int>("band");
                 int ksize = v.second.get<int>("ksize");
                 radiometric::GaussianBlur* op = new radiometric::GaussianBlur(ksize, band);
                 ops->Add(op);
+                boutput = 1;
+            }else if(name == "dark"){
+              std::string b = v.second.get<std::string>("b");
+              radiometric::DarkLevelCorrection* op = new radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+              if (!op->load(b.c_str())) {
+                std::cout << "ERROR:dark file not loaded a and b" << std::endl;
+                return 1;
+              }
+              ops->Add(op);
+			  boutput = 1;
+            }else if(name == "statistic"){
+              std::string method = v.second.get<std::string>("method", "mean");
+              boost::filesystem::path dstpath(path);
+              dstpath.replace_extension();
+              dstpath += "_"+method+".txt";
+              radiometric::FrameIterator* op = nullptr;
+              if(method=="mean"){
+                radiometric::MeanStdCalculator* p = new radiometric::MeanStdCalculator(buffer_size[store_prior[1]]);
+                p->SetFilePath(dstpath.string().c_str());
+                op = p;
+              } else{
+                radiometric::MedianCalculator* p = new radiometric::MedianCalculator(buffer_size[store_prior[1]]);
+                p->SetFilePath(dstpath.string().c_str());
+                op = p;
+              }
+              ops->Add(op);
             }
             else if (name == "interp" && !outpath.empty()) {
                 std::vector<double> wl_old, wl_new;
@@ -346,8 +366,18 @@ int main(int argc, char* argv[]){
                 radiometric::BandInterpolator* op = new radiometric::BandInterpolator(std::move(wl_old), std::move(wl_new));
                 op->SetInterpType(type);
                 ops->Add(op);
+                boutput = 1;
             }
         }
+		if (boutput) {
+			if (!FLAGS_o.empty()) outpath = FLAGS_o;
+			else {
+				outpath = path;
+				outpath.replace_extension();
+				outpath += "_mod";
+				outpath += path.extension();
+			}
+		}
         if (!outpath.empty()) {
 			dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows, dst_bands, src->GetRasterBand(1)->GetRasterDataType());
 			if (dst == nullptr) {
@@ -355,9 +385,10 @@ int main(int argc, char* argv[]){
 				return 1;
 			}
         }
+        frame.SetStoreOrder(store_prior);
         frame.SetSource(src);
         if (dst) frame.SetDestination(dst);
-        int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()>dst_bands?src->GetRasterCount():dst_bands};
+        if (buffer_size[2] < dst_bands) buffer_size[2] = dst_bands;
         {
             size_t max_buffer_size = (size_t)1024 * 1024 * 1024;
             buffer_size[store_prior[2]] = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
@@ -381,7 +412,7 @@ int main(int argc, char* argv[]){
         HSP::Pos pos;
         pos.load(FLAGS_gcp.c_str());
         HSP::PinholeCamera cam;
-        cam.Load("G:\\jincang\\camera_swir.txt");
+        cam.Load("G:\\jincang\\camera_vnir.txt");
         HSP::LinescanModel model;
         model.SetCamera(&cam);
         model.SetPos(&pos);

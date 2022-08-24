@@ -239,9 +239,13 @@ class MeanStdCalculator : public FrameIterator{
   std::vector<double> _mean;
   std::vector<double> _std;
   int _width;
+  char _filepath[512];
  public:
   typedef float DataType;
   MeanStdCalculator(int w) : _width(w) {}
+  ~MeanStdCalculator(){
+    save(_filepath);
+  }
   std::pair<double, double> compute(DataType* data, int n){
     std::pair<double, double> ret = std::make_pair(0, 0);
     for(int i=0; i<n; ++i){
@@ -251,6 +255,9 @@ class MeanStdCalculator : public FrameIterator{
     ret.first /= n;
     ret.second = std::sqrt(ret.second/n-ret.first*ret.first);
     return ret;
+  }
+  void SetFilePath(const char* filepath){
+    strcpy(_filepath, filepath);
   }
   bool save(const char* filepath){
 
@@ -288,8 +295,15 @@ class MedianCalculator : public FrameIterator{
  private:
   std::vector<DataType> _median;
   int _width;
+  char _filepath[512];
  public:
   MedianCalculator(int w) : _width(w) {}
+  ~MedianCalculator(){
+    save(_filepath);
+  }
+  void SetFilePath(const char* filepath){
+    strcpy(_filepath, filepath);
+  }
   DataType compute(DataType* data, int n){
     std::sort(data, data+n);
     return data[n>>1];
