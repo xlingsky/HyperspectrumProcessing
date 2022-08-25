@@ -96,7 +96,7 @@ class LinescanModel{
   }
   CameraMatrixType CameraMatrix(double linenumber) const;
   bool GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath);
-  void test( const char* gcppath, const char* prjpath);
+  void test();
 };
 
 };

@@ -444,11 +444,11 @@ std::vector<double> GenerateSample(double range[2], int num) {
 
 bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath) {
     std::vector<double> samp1d =  GenerateSample(range_samp, 3);
-    std::vector<double> height1d; height1d.push_back((range_height[0]+range_height[1])/2);// = GenerateSample(range_height, 3);
-    std::vector<double> line1d = GenerateSample(range_line, 100);
-//    auto& posdata = _pos->_data;
-//    for (auto& pos : posdata)
-//        if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
+    std::vector<double> height1d = GenerateSample(range_height, 3);
+    std::vector<double> line1d ;//= GenerateSample(range_line, 100);
+   auto& posdata = _pos->_data;
+   for (auto& pos : posdata)
+       if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
     for (auto& h : height1d)
         h -= _pos->_offset[2];
     size_t count = samp1d.size() * line1d.size() * height1d.size();
@@ -487,78 +487,29 @@ bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], doub
     strcpy(ps, "height.txt");
     WriteVector(debug_path, grid_height.begin(), grid_height.end());
 #endif
-    GDALDataset* src = (GDALDataset*)GDALOpen(rpcpath, GA_Update);
-    GDAL_GCP* pasGCPs = new GDAL_GCP[count];
-    GDALInitGCPs(count, pasGCPs);
-    for (int i = 0; i < count; ++i) {
-        pasGCPs[i].dfGCPPixel= grid_samp[i];
-        pasGCPs[i].dfGCPLine = grid_line[i];
-        pasGCPs[i].dfGCPX = grid_lon[i];
-        pasGCPs[i].dfGCPY = grid_lat[i];
-        pasGCPs[i].dfGCPZ = grid_height[i];
-    }
-	src->SetGCPs(count, pasGCPs, SRS_WKT_WGS84_LAT_LONG);
-    GDALDeinitGCPs(count, pasGCPs);
-    delete[] pasGCPs;
+  //   GDALDataset* src = (GDALDataset*)GDALOpen(rpcpath, GA_Update);
+  //   GDAL_GCP* pasGCPs = new GDAL_GCP[count];
+  //   GDALInitGCPs(count, pasGCPs);
+  //   for (int i = 0; i < count; ++i) {
+  //       pasGCPs[i].dfGCPPixel= grid_samp[i];
+  //       pasGCPs[i].dfGCPLine = grid_line[i];
+  //       pasGCPs[i].dfGCPX = grid_lon[i];
+  //       pasGCPs[i].dfGCPY = grid_lat[i];
+  //       pasGCPs[i].dfGCPZ = grid_height[i];
+  //   }
+	// src->SetGCPs(count, pasGCPs, SRS_WKT_WGS84_LAT_LONG);
+  //   GDALDeinitGCPs(count, pasGCPs);
+  //   delete[] pasGCPs;
     
-    return true;
+  //   return true;
     xlingeo::Rpc rpc;
     rpc.Solve(grid_samp.data(), grid_line.data(), grid_lat.data(), grid_lon.data(), grid_height.data(), grid_samp.size());
     rpc.Save(rpcpath);
     return true;
 }
 
-void LinescanModel::test(const char* gcppath, const char* prjpath){
-  auto& posdata = _pos->_data;
-  auto it1 = posdata.begin();
-  ++it1;
-  auto it2 = it1;//posdata.rbegin();
-  ++it2;
+void LinescanModel::test(){
 
-  CameraMatrixType cam1 = _camera->CameraMatrix();
-  Eigen::Vector3d c;
-  _pos->GetPosition(it1->first, c.data());
-  auto pose = _pos->GetQuaternion(it1->first);
-  Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
-  h.block<3, 3>(0, 0) = pose.matrix();
-  h.block<3, 1>(0, 3) << -h.block<3, 3>(0, 0) * c;
-  Eigen::Matrix4d hcvt;
-  hcvt << 1, 0, 0, 0,
-      0, 1, 0, 0,
-      0, 0, -1, 0,
-      0, 0, 0, 1;
-
-  Eigen::Matrix<double, 4, 1> x;
-  _pos->GetPosition(it2->first, x.data());
-  x[2] -= 2000;
-  x[3] = 1;
-//  x << 101.974001, 38.62077165, 1901.699, 1;
-//  _pos->Cvt_BLH2Local(x.data());
-  Eigen::Vector4d k = hcvt*h*x;
-  Eigen::Vector2d imk = (cam1 * k).hnormalized();
-  Eigen::Vector2d imx = (cam1 * x).hnormalized();
-
-  return;
-  double gsd = std::fabs(it1->second.x[0]-it2->second.x[0])/((double)it2->first-it1->first);
-  int x_range = 500;
-  int x_center = 1024-300;
-
-  int flag = std::abs(it1->second.a[2] - 90) > std::abs(it1->second.a[2] - 270) ? 1 : -1;
-
-  FILE* fp = fopen(prjpath, "w");
-  if (fp) {
-      fprintf(fp, "%s", _pos->_utm_wkt);
-      fclose(fp);
-  }
-  fp = fopen(gcppath, "w");
-  if (fp) {
-      fprintf(fp, "%d %d %lf %lf\n", x_center - x_range, it1->first, it1->second.x[0], it1->second.x[1] + flag * gsd * (-x_range));
-      fprintf(fp, "%d %d %lf %lf\n", x_center + x_range, it1->first, it1->second.x[0], it1->second.x[1] + flag * gsd * x_range);
-      fprintf(fp, "%d %d %lf %lf\n", x_center - x_range, it2->first, it2->second.x[0], it2->second.x[1] + flag * gsd * (-x_range));
-      fprintf(fp, "%d %d %lf %lf\n", x_center + x_range, it2->first, it2->second.x[0], it2->second.x[1] + flag * gsd * x_range);
-      fclose(fp);
-  }
-  
   return;
 }
 

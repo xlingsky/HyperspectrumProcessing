@@ -354,7 +354,7 @@ public:
         _temp.resize((size_t)size[0]*size[1]*size[2]);
         memcpy(_temp.data(), data, sizeof(float)*_temp.size());
         for (int i = 0; i < 3; ++i) space[i] /= sizeof(float);
-        int size_new[3] = {size[0], size[1], _wl_new.size() };
+        int size_new[3] = {size[0], size[1], (int)_wl_new.size() };
         int space_new[3];
         if (prior[0] == 2) {
             space_new[0] = space[0] / _wl_old.size() * _wl_new.size();
