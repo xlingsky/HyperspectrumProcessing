@@ -53,6 +53,7 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
       rec.a[0] *= (M_PI / 180);
       rec.a[1] *= (M_PI / 180);
       rec.a[2] *= (M_PI / 180);
+      rec.a[0] = rec.a[1] = 0;
   }
 
   return true;
@@ -509,8 +510,16 @@ bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], doub
 }
 
 void LinescanModel::test(){
+    auto cam = CameraMatrix(85);
+    Eigen::Vector4d X;
 
-  return;
+    X << 101.8514647,	38.50230176,	2046.9854	, 1;
+
+    _pos->Cvt_BLH2Local(X.data());
+    Eigen::Vector2d x = (cam * X).hnormalized();
+
+    std::cout << x << std::endl;
+	return;
 }
 
 
