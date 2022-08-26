@@ -77,6 +77,8 @@ class PinholeCamera{
     _intrinsic(0, 2) = x;
     _intrinsic(1, 2) = y;
   }
+  void SetAngles(double a[3]);
+  void SetTranslation(double offset[3]);
 };
 
 class LinescanModel{

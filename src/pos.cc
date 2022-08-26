@@ -158,6 +158,19 @@ Interpolator* CreateInterpolator(std::map<int, Pos::record>& data){
   return interp;
 }
 
+Eigen::Quaterniond Angle2Quat(double ax, double ay, double az, const int order[3]) {
+	Eigen::AngleAxisd aa[3];
+	aa[0] = Eigen::AngleAxisd(ax, Eigen::Vector3d::UnitX());
+	aa[1] = Eigen::AngleAxisd(ay, Eigen::Vector3d::UnitY());
+	aa[2] = Eigen::AngleAxisd(az, Eigen::Vector3d::UnitZ());
+    return aa[order[2]] * aa[order[1]] * aa[order[0]];
+}
+Eigen::Quaterniond rpy2Quat(double ax, double ay, double az) {
+    const int order[3] = {1,0,2};
+    return Angle2Quat(ax, ay, az, order);
+}
+
+
 Pos::~Pos(){
   if(_reprojector)
     GDALDestroyTransformer(_reprojector);
@@ -301,10 +314,11 @@ int Pos::GetPos(double lineid, double x[3], double a[3]){
 Eigen::Quaterniond Pos::GetQuaternion(double lineid){
   double a[3];
   GetAngle(lineid, a);
-  auto pitch = Eigen::AngleAxisd(a[1], Eigen::Vector3d::UnitX());
-  auto roll = Eigen::AngleAxisd(a[0], Eigen::Vector3d::UnitY());
-  auto yaw = Eigen::AngleAxisd(a[2], Eigen::Vector3d::UnitZ());
-  return yaw*pitch*roll;
+  return rpy2Quat(a[1], a[0], a[2]);
+//  auto pitch = Eigen::AngleAxisd(a[1], Eigen::Vector3d::UnitX());
+//  auto roll = Eigen::AngleAxisd(a[0], Eigen::Vector3d::UnitY());
+//  auto yaw = Eigen::AngleAxisd(a[2], Eigen::Vector3d::UnitZ());
+//  return yaw*pitch*roll;
 }
 
 int Pos::Check(){
@@ -408,14 +422,28 @@ bool PinholeCamera::Load(const char* filepath) {
     FILE* fp = fopen(filepath, "r");
     if (fp == nullptr) return false;
     bool ret = false;
+    char line[512];
     double f, pixel, x0, y0;
-    if (fscanf(fp, "%lf%lf%lf%lf", &f, &pixel, &x0, &y0) == 4) {
+    if (fgets(line, 512, fp) && sscanf(line, "%lf%lf%lf%lf", &f, &pixel, &x0, &y0) == 4) {
         SetFocalLength(f / pixel);
         SetPrincipalPoint(x0, y0);
-        ret = true;
+        double a[3], offset[3];
+        if (fgets(line, 512, fp) && 
+            sscanf(line, "%lf%lf%lf%lf%lf%lf", a, a+1, a+2, offset, offset+1, offset+2) == 6) {
+            SetAngles(a);
+            SetTranslation(offset);
+			ret = true;
+        }
     }
     fclose(fp);
     return ret;
+}
+
+void PinholeCamera::SetAngles(double a[3]) {
+    _pose = rpy2Quat(a[0], a[1], a[2]);
+}
+void PinholeCamera::SetTranslation(double offset[3]) {
+    _translation << offset[0], offset[1], offset[2];
 }
 
 CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
