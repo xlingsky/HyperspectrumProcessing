@@ -412,14 +412,14 @@ int main(int argc, char* argv[]){
         HSP::Pos pos;
         pos.load(FLAGS_gcp.c_str());
         HSP::PinholeCamera cam;
-        cam.SetFocalLength(2000);
+        cam.Load("G:\\jincang\\camera_vnir.txt");
         HSP::LinescanModel model;
         model.SetCamera(&cam);
         model.SetPos(&pos);
 //        boost::filesystem::path rpcpath(path);
 //        rpcpath.replace_extension(".rpc");
-        model.test();
-        double range_samp[] = {10, 1520};
+//        model.test();
+        double range_samp[] = {10, 1300};
         double range_line[] = {8, (double)pos.data().rbegin()->first-8};
         double range_height[] = {1500, 2500};
         model.GenerateRPC(range_samp, range_line, range_height, path.string().c_str());

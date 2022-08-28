@@ -44,7 +44,7 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
              , &rec.week, &rec.time
              , rec.blh+1, rec.blh, rec.blh+2
              , rec.vx+1, rec.vx, rec.vx+2
-             , rec.a, rec.a+1, rec.a+2
+             , rec.a+1, rec.a, rec.a+2
              ) != 11){
     return false;
   }
@@ -53,7 +53,6 @@ bool MARK1PVAA(const char* msg, HSP::Pos::record& rec){
       rec.a[0] *= (M_PI / 180);
       rec.a[1] *= (M_PI / 180);
       rec.a[2] *= (M_PI / 180);
-      rec.a[0] = rec.a[1] = 0;
   }
 
   return true;
@@ -314,7 +313,7 @@ int Pos::GetPos(double lineid, double x[3], double a[3]){
 Eigen::Quaterniond Pos::GetQuaternion(double lineid){
   double a[3];
   GetAngle(lineid, a);
-  return rpy2Quat(a[1], a[0], a[2]);
+  return rpy2Quat(a[0], a[1], a[2]);
 //  auto pitch = Eigen::AngleAxisd(a[1], Eigen::Vector3d::UnitX());
 //  auto roll = Eigen::AngleAxisd(a[0], Eigen::Vector3d::UnitY());
 //  auto yaw = Eigen::AngleAxisd(a[2], Eigen::Vector3d::UnitZ());
@@ -446,6 +445,17 @@ void PinholeCamera::SetTranslation(double offset[3]) {
     _translation << offset[0], offset[1], offset[2];
 }
 
+
+CameraMatrixType PinholeCamera::CameraMatrix() const {
+    Eigen::Matrix3d reverse_axis = Eigen::Matrix3d::Identity();
+    reverse_axis(0, 0) = -1;
+    reverse_axis(2, 2) = -1;
+	CameraMatrixType m = CameraMatrixType::Zero();
+	m.block<3, 3>(0, 0).noalias() = _intrinsic*reverse_axis*_pose.matrix();
+	m.block<3, 1>(0, 3).noalias() = -m.block<3, 3>(0, 0) * _translation;
+	return m;
+}
+
 CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
 {
   CameraMatrixType m = _camera->CameraMatrix();
@@ -455,12 +465,7 @@ CameraMatrixType LinescanModel::CameraMatrix(double linenumber) const
   Eigen::Matrix4d h = Eigen::Matrix4d::Identity();
   h.block<3, 3>(0,0) = pose.matrix();
   h.block<3, 1>(0,3) << -h.block<3, 3>(0, 0)*x;
-  Eigen::Matrix4d hcvt;
-  hcvt << 1, 0, 0, 0,
-      0, 1, 0, 0,
-      0, 0, -1, 0,
-      0, 0, 0, 1;
-  return m*hcvt*h;
+  return m*h;
 }
 
 std::vector<double> GenerateSample(double range[2], int num) {
@@ -473,11 +478,11 @@ std::vector<double> GenerateSample(double range[2], int num) {
 
 bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], double range_height[2], const char* rpcpath) {
     std::vector<double> samp1d =  GenerateSample(range_samp, 3);
-    std::vector<double> height1d = GenerateSample(range_height, 3);
-    std::vector<double> line1d ;//= GenerateSample(range_line, 100);
-   auto& posdata = _pos->_data;
-   for (auto& pos : posdata)
-       if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
+    std::vector<double> height1d = { (range_height[0] + range_height[1]) / 2 };// GenerateSample(range_height, 3);
+    std::vector<double> line1d = GenerateSample(range_line, 3);
+//   auto& posdata = _pos->_data;
+//   for (auto& pos : posdata)
+//       if (pos.first >= range_line[0] && pos.first <= range_line[1]) line1d.push_back(pos.first);
     for (auto& h : height1d)
         h -= _pos->_offset[2];
     size_t count = samp1d.size() * line1d.size() * height1d.size();
@@ -516,21 +521,21 @@ bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], doub
     strcpy(ps, "height.txt");
     WriteVector(debug_path, grid_height.begin(), grid_height.end());
 #endif
-  //   GDALDataset* src = (GDALDataset*)GDALOpen(rpcpath, GA_Update);
-  //   GDAL_GCP* pasGCPs = new GDAL_GCP[count];
-  //   GDALInitGCPs(count, pasGCPs);
-  //   for (int i = 0; i < count; ++i) {
-  //       pasGCPs[i].dfGCPPixel= grid_samp[i];
-  //       pasGCPs[i].dfGCPLine = grid_line[i];
-  //       pasGCPs[i].dfGCPX = grid_lon[i];
-  //       pasGCPs[i].dfGCPY = grid_lat[i];
-  //       pasGCPs[i].dfGCPZ = grid_height[i];
-  //   }
-	// src->SetGCPs(count, pasGCPs, SRS_WKT_WGS84_LAT_LONG);
-  //   GDALDeinitGCPs(count, pasGCPs);
-  //   delete[] pasGCPs;
-    
-  //   return true;
+     GDALDataset* src = (GDALDataset*)GDALOpen(rpcpath, GA_Update);
+     GDAL_GCP* pasGCPs = new GDAL_GCP[count];
+     GDALInitGCPs(count, pasGCPs);
+     for (int i = 0; i < count; ++i) {
+         pasGCPs[i].dfGCPPixel= grid_samp[i];
+         pasGCPs[i].dfGCPLine = grid_line[i];
+         pasGCPs[i].dfGCPX = grid_lon[i];
+         pasGCPs[i].dfGCPY = grid_lat[i];
+         pasGCPs[i].dfGCPZ = grid_height[i];
+     }
+   src->SetGCPs(count, pasGCPs, SRS_WKT_WGS84_LAT_LONG);
+     GDALDeinitGCPs(count, pasGCPs);
+     delete[] pasGCPs;
+  
+     return true;
     xlingeo::Rpc rpc;
     rpc.Solve(grid_samp.data(), grid_line.data(), grid_lat.data(), grid_lon.data(), grid_height.data(), grid_samp.size());
     rpc.Save(rpcpath);
@@ -538,15 +543,26 @@ bool LinescanModel::GenerateRPC(double range_samp[2], double range_line[2], doub
 }
 
 void LinescanModel::test(){
-    auto cam = CameraMatrix(85);
-    Eigen::Vector4d X;
+    int linenumber = 107;
+//    auto cam = CameraMatrix(107);
+    Eigen::Vector3d X;
 
-    X << 101.8514647,	38.50230176,	2046.9854	, 1;
+    X << 101.8514647,	38.50230176,	2046.9854;
 
     _pos->Cvt_BLH2Local(X.data());
-    Eigen::Vector2d x = (cam * X).hnormalized();
 
-    std::cout << x << std::endl;
+//    Eigen::Vector2d x = (cam * X).hnormalized();
+//    std::cout << x << std::endl;
+
+    Eigen::Vector3d X_pos;
+    _pos->GetPosition(linenumber, X_pos.data());
+    auto pose = _pos->GetQuaternion(linenumber);
+
+    Eigen::Vector3d X_rel2pos = X-X_pos;
+    Eigen::Vector3d X_inpos = pose.matrix() * X_rel2pos;
+    Eigen::Vector3d X_incam = X_inpos - _camera->_translation;
+    Eigen::Vector3d X_img = _camera->_intrinsic * X_incam;
+    Eigen::Vector2d x = X_img.hnormalized();
 	return;
 }
 

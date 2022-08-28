@@ -57,6 +57,8 @@ Eigen::Matrix<double, 4, Eigen::Dynamic> BackProjectionToPlane(const CameraMatri
 Eigen::Matrix<double,4,Eigen::Dynamic> BackProjectionToPlane(const CameraMatrixType& camera,const Eigen::Matrix<double,3,Eigen::Dynamic>& im, const Eigen::Matrix<double,4,1>& plane_equation);
 
 class PinholeCamera{
+ public:
+  friend class LinescanModel;
  protected:
   Eigen::Matrix3d _intrinsic;
   Eigen::Quaterniond _pose;
@@ -64,12 +66,7 @@ class PinholeCamera{
  public:
   PinholeCamera() : _intrinsic(Eigen::Matrix3d::Identity()), _pose(Eigen::Quaterniond::Identity()), _translation(Eigen::Vector3d::Zero()) {};
   bool Load(const char* filepath);
-  CameraMatrixType CameraMatrix() const{
-    CameraMatrixType m;
-    m.block<3,3>(0,0).noalias() = _intrinsic*_pose.matrix();
-    m.block<3,1>(0,3).noalias() = -m.block<3,3>(0,0)*_translation;
-    return m;
-  }
+  CameraMatrixType CameraMatrix() const;
   void SetFocalLength(double f){
     _intrinsic(0,0) = _intrinsic(1,1) = f;
   }
