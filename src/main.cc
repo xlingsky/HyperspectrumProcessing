@@ -15,6 +15,9 @@
 #include "gdalex.hpp"
 #include "decode.h"
 #include "radiometric_correction.hpp"
+#include "SpectrumInterp.hpp"
+#include "RasterProcessor.hpp"
+#include "ipf.hpp"
 #include "pos.h"
 #include "bigfileio.h"
 
@@ -254,8 +257,8 @@ int main(int argc, char* argv[]){
         int dst_rows = src->GetRasterYSize();
         int dst_bands = src->GetRasterCount();
         
-        radiometric::ComboOperator* ops = new radiometric::ComboOperator;
-        ipf::RasterOperator frame( ops,GDT_Float32);
+        xlingsky::raster::ComboOperator* ops = new xlingsky::raster::ComboOperator;
+        xlingsky::raster::Processor frame( ops,GDT_Float32);
         int store_prior[3] = {0,2,1};
         int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()};
 		boost::filesystem::path outpath;
@@ -278,7 +281,7 @@ int main(int argc, char* argv[]){
             if (name == "uniform") {
                 std::string a = v.second.get<std::string>("a");
                 std::string b = v.second.get<std::string>("b");
-                radiometric::NonUniformCorrection* op = new radiometric::NonUniformCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
                 if (!op->load(a.c_str(), b.c_str())) {
                     std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
                     return 1;
@@ -288,7 +291,7 @@ int main(int argc, char* argv[]){
             }
             else if (name == "badpixel") {
                 std::string b = v.second.get<std::string>("file");
-                radiometric::BadPixelCorrection* op = new radiometric::BadPixelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                xlingsky::raster::radiometric::BadPixelCorrection* op = new xlingsky::raster::radiometric::BadPixelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
                 if (!op->load( b.c_str())) {
                     std::cout << "ERROR:badpixel file not loaded a and b" << std::endl;
                     return 1;
@@ -299,12 +302,12 @@ int main(int argc, char* argv[]){
             else if (name == "gauss") {
                 int band = v.second.get<int>("band");
                 int ksize = v.second.get<int>("ksize");
-                radiometric::GaussianBlur* op = new radiometric::GaussianBlur(ksize, band);
+                xlingsky::raster::radiometric::GaussianBlur* op = new xlingsky::raster::radiometric::GaussianBlur(ksize, band);
                 ops->Add(op);
                 boutput = 1;
             }else if(name == "dark"){
               std::string b = v.second.get<std::string>("b");
-              radiometric::DarkLevelCorrection* op = new radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+              xlingsky::raster::radiometric::DarkLevelCorrection* op = new xlingsky::raster::radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
               if (!op->load(b.c_str())) {
                 std::cout << "ERROR:dark file not loaded a and b" << std::endl;
                 return 1;
@@ -316,13 +319,13 @@ int main(int argc, char* argv[]){
               boost::filesystem::path dstpath(path);
               dstpath.replace_extension();
               dstpath += "_"+method+".txt";
-              radiometric::FrameIterator* op = nullptr;
+              xlingsky::raster::FrameIterator* op = nullptr;
               if(method=="mean"){
-                radiometric::MeanStdCalculator* p = new radiometric::MeanStdCalculator(buffer_size[store_prior[1]]);
+                xlingsky::raster::radiometric::MeanStdCalculator* p = new xlingsky::raster::radiometric::MeanStdCalculator(buffer_size[store_prior[1]]);
                 p->SetFilePath(dstpath.string().c_str());
                 op = p;
               } else{
-                radiometric::MedianCalculator* p = new radiometric::MedianCalculator(buffer_size[store_prior[1]]);
+                xlingsky::raster::radiometric::MedianCalculator* p = new xlingsky::raster::radiometric::MedianCalculator(buffer_size[store_prior[1]]);
                 p->SetFilePath(dstpath.string().c_str());
                 op = p;
               }
@@ -330,7 +333,7 @@ int main(int argc, char* argv[]){
             }
             else if (name == "interp" && !outpath.empty()) {
                 std::vector<double> wl_old, wl_new;
-                radiometric::BandInterpolator::InterpType type;
+                xlingsky::raster::spectrum::Interpolator::InterpType type;
                 {
 					std::string w0 = v.second.get<std::string>("wl0");
 					std::string w1 = v.second.get<std::string>("wl1");
@@ -350,20 +353,20 @@ int main(int argc, char* argv[]){
 
 					std::string t = v.second.get<std::string>("type", "pchip");
                     if (t == "spline_cubic")
-                        type = radiometric::BandInterpolator::BSPLINE_CUBIC;
+                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_CUBIC;
                     else if(t=="spline_quintic")
-                        type = radiometric::BandInterpolator::BSPLINE_QUINTIC;
+                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUINTIC;
                     else if(t=="spline_quadratic")
-                        type = radiometric::BandInterpolator::BSPLINE_QUADRATIC;
+                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUADRATIC;
                     else if(t=="makima")
-                        type = radiometric::BandInterpolator::MAKIMA;
+                        type = xlingsky::raster::spectrum::Interpolator::MAKIMA;
                     else if(t=="barycentric")
-                        type = radiometric::BandInterpolator::BARYCENTRIC;
+                        type = xlingsky::raster::spectrum::Interpolator::BARYCENTRIC;
                     else
-                        type = radiometric::BandInterpolator::PCHIP;
+                        type = xlingsky::raster::spectrum::Interpolator::PCHIP;
                 }
                 dst_bands = wl_new.size();
-                radiometric::BandInterpolator* op = new radiometric::BandInterpolator(std::move(wl_old), std::move(wl_new));
+                xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(std::move(wl_old), std::move(wl_new));
                 op->SetInterpType(type);
                 ops->Add(op);
                 boutput = 1;
@@ -396,7 +399,7 @@ int main(int argc, char* argv[]){
         }
 		frame.ReserveBufferSize((size_t)buffer_size[0] * buffer_size[1] * buffer_size[2]);
         if (src->GetRasterCount() < buffer_size[2])  buffer_size[2] = src->GetRasterCount();
-        ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
+        xlingsky::ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
 
         delete ops;
         if (dst) {
@@ -416,9 +419,9 @@ int main(int argc, char* argv[]){
         HSP::LinescanModel model;
         model.SetCamera(&cam);
         model.SetPos(&pos);
-//        boost::filesystem::path rpcpath(path);
-//        rpcpath.replace_extension(".rpc");
-//        model.test();
+        boost::filesystem::path rpcpath(path);
+        rpcpath.replace_extension(".rpc");
+        model.test();
         double range_samp[] = {10, 1300};
         double range_line[] = {8, (double)pos.data().rbegin()->first-8};
         double range_height[] = {1500, 2500};

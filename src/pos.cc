@@ -81,13 +81,13 @@ bool Parse(const char* msg, HSP::Pos::record& rec){
 
 namespace HSP{
 
-    typedef pchip D1Interp;
-    typedef cubic_hermite D2Interp;
+    typedef xlingsky::pchip D1Interp;
+    typedef xlingsky::cubic_hermite D2Interp;
 
 class Interpolator{
  public:
-  InterpolatorAdaptor* _x[3];
-  InterpolatorAdaptor* _a[3];
+  xlingsky::InterpolatorAdaptor* _x[3];
+  xlingsky::InterpolatorAdaptor* _a[3];
  public:
   Interpolator() {
     _x[0] = _x[1] = _x[2] = nullptr;
@@ -123,7 +123,7 @@ void DestroyInterpolator(void* t){
 
 Interpolator* CreateInterpolator(std::map<int, Pos::record>& data){
   if(data.size()<3) return nullptr;
-  ValueContainer t, x[3], vx[3], a[3];
+  xlingsky::InterpValueContainer t, x[3], vx[3], a[3];
   bool vx_flag = true;
   t.reserve(data.size());
   for(int i=0; i<3; ++i){
@@ -147,7 +147,7 @@ Interpolator* CreateInterpolator(std::map<int, Pos::record>& data){
 
   Interpolator* interp = new Interpolator;
   for(int i=0; i<3; ++i){
-    ValueContainer t1 = t;
+    xlingsky::InterpValueContainer t1 = t;
     if(vx_flag) interp->_x[i] = new D2Interp(std::move(t1), std::move(x[i]), std::move(vx[i]));
     else interp->_x[i] = new D1Interp(std::move(t1), std::move(x[i]));
     t1 = t;
