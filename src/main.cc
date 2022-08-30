@@ -305,6 +305,11 @@ int main(int argc, char* argv[]){
                 xlingsky::raster::radiometric::GaussianBlur* op = new xlingsky::raster::radiometric::GaussianBlur(ksize, band);
                 ops->Add(op);
                 boutput = 1;
+            }else if (name == "median") {
+                int ksize = v.second.get<int>("ksize");
+                xlingsky::raster::radiometric::MedianBlur* op = new xlingsky::raster::radiometric::MedianBlur(ksize);
+                ops->Add(op);
+                boutput = 1;
             }else if(name == "dark"){
               std::string b = v.second.get<std::string>("b");
               xlingsky::raster::radiometric::DarkLevelCorrection* op = new xlingsky::raster::radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());

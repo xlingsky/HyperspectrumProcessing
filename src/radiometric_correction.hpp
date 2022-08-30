@@ -254,7 +254,7 @@ class MedianBlur : public FrameIterator {
 
  public:
   typedef float DataType;
-  MedianBlur() : _ksize(5) {}
+  MedianBlur(int ksize) : _ksize(ksize) {}
   bool operator()(int r, void* data, int cols, int rows) override {
     cv::Mat m(rows, cols, cv::DataType<DataType>::type, data);
     cv::medianBlur(m, m, _ksize);
