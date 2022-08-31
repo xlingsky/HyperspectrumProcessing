@@ -28,6 +28,7 @@ class ComboOperator : public Operator {
       if (!op->operator()(data, size, space, prior)) return false;
     return true;
   }
+  size_t size() const { return _ops.size(); }
 
  protected:
   std::vector<Operator*> _ops;

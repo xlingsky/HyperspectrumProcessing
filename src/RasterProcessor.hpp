@@ -7,6 +7,11 @@
 #include <numeric>
 #include "gdal_traits.hpp"
 
+#ifdef _LOGGING
+#include <glog/logging.h>
+#define _LOG_LEVEL_RASTERPROCESSOR 3
+#endif
+
 namespace xlingsky {
 
 namespace raster {
@@ -80,6 +85,10 @@ class Processor {
         GetDataTypeSize() * _seg[_storeorder[0]].second;
     store_space[_storeorder[2]] =
         store_space[_storeorder[1]] * _seg[_storeorder[1]].second;
+    
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "RasterIO reading...";
+#endif
     if (_src.dataset &&
         _src.dataset->RasterIO(
             GF_Read, _src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first,
@@ -87,6 +96,9 @@ class Processor {
             _seg[1].second, _datatype, _seg[2].second, &_bandlist[0],
             store_space[0], store_space[1], store_space[2]) == CE_None) {
       int store_size[3] = {_seg[0].second, _seg[1].second, _seg[2].second};
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "Operators starting...";
+#endif
       if (_op->operator()(&_buffer[0], store_size, store_space, _storeorder)) {
         if (_dst.dataset) {
           int* dst_bandlist = nullptr;
@@ -95,6 +107,9 @@ class Processor {
             std::iota(dst_bandlist, dst_bandlist + store_size[2],
                       _dst.win[2] + _seg[2].first);
           }
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "RasterIO writing..." ;
+#endif
           if (_dst.dataset->RasterIO(
                   GF_Write, _dst.win[0] + _seg[0].first,
                   _dst.win[1] + _seg[1].first, store_size[0], store_size[1],

@@ -22,6 +22,8 @@ if(OPENMP_FOUND)
 	endif()
 endif()
 
+	ADD_DEFINITIONS(-D_LOGGING)
+
 set(decode
   src/main.cc
   src/decode.cc

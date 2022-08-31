@@ -206,9 +206,7 @@ bool Splice(PathIterator first, PathIterator last, const char* dstpath){
 
 int main(int argc, char* argv[]){
 
-#ifndef NDEBUG
   FLAGS_logtostderr = 1;
-#endif
 
   GDALAllRegister();
   CPLSetConfigOption("GDAL_FILENAME_IS_UTF8", "NO");
@@ -216,13 +214,11 @@ int main(int argc, char* argv[]){
   std::string usage("This program decodes hyper-spectrum raw data. Usage:\n");
   {
     std::string name = boost::filesystem::path(argv[0]).filename().string();
-    usage = usage + "[Decode]: " + name + " <raw data file>*\n"
-            +"[DarkCorrect]: " + name + " -r0 <dark level file> <image file>\n"
-            +"[BadpixelCorrect]: "+name+" -r1 <bad pixel file> <image file>\n"
-            +"[NonuniformCorrect]: "+name+" -r0 <file b> -r1 <file a> <image file>\n";
+    usage = usage + "[Decode]: " + name + " <raw data file>*\n" +
+            "[task]: " + name + " -task <task xml file> <image file>\n";
   }
   gflags::SetUsageMessage(usage);
-  gflags::SetVersionString("1.0");
+  gflags::SetVersionString("2.0");
 
   google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -314,7 +310,7 @@ int main(int argc, char* argv[]){
               std::string b = v.second.get<std::string>("b");
               xlingsky::raster::radiometric::DarkLevelCorrection* op = new xlingsky::raster::radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
               if (!op->load(b.c_str())) {
-                std::cout << "ERROR:dark file not loaded a and b" << std::endl;
+                std::cout << "ERROR:dark file not loaded b" << std::endl;
                 return 1;
               }
               ops->Add(op);
@@ -387,11 +383,14 @@ int main(int argc, char* argv[]){
 			}
 		}
         if (!outpath.empty()) {
-			dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows, dst_bands, src->GetRasterBand(1)->GetRasterDataType());
-			if (dst == nullptr) {
-				GDALClose(src);
-				return 1;
-			}
+                  dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows,
+                                   dst_bands,
+                                   src->GetRasterBand(1)->GetRasterDataType());
+          if (dst == nullptr) {
+            GDALClose(src);
+            return 1;
+          };
+          VLOG(1) << "Output path is " << outpath.string();
         }
         frame.SetStoreOrder(store_prior);
         frame.SetSource(src);
@@ -404,6 +403,9 @@ int main(int argc, char* argv[]){
         }
 		frame.ReserveBufferSize((size_t)buffer_size[0] * buffer_size[1] * buffer_size[2]);
         if (src->GetRasterCount() < buffer_size[2])  buffer_size[2] = src->GetRasterCount();
+
+        VLOG(1) << "Total number of tasks is " << ops->size();
+
         xlingsky::ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
 
         delete ops;
