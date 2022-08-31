@@ -138,4 +138,13 @@ def main():
     np.savetxt('/Volumes/data/20220525/863FEIXIN/nonuniform_b.txt', b)
     
 if __name__ == "__main__":
-   moduleShift(sys.argv[1]);
+    filepath = sys.argv[1]
+    data = np.loadtxt(filepath)
+    reflect = np.ones((data.shape[0],1),dtype=data.dtype)*9500
+    a = np.zeros_like(data)
+    b = np.zeros_like(data)
+    for r in range(data.shape[0]):
+        a[r,:] = reflect[r]/data[r,:]
+    np.savetxt(os.path.join(os.path.dirname(filepath), 'a.txt'), a, fmt='%.1f')
+    np.savetxt(os.path.join(os.path.dirname(filepath), 'b.txt'), b, fmt='%.1f')
+
