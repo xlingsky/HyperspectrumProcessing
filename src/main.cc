@@ -29,11 +29,10 @@ DEFINE_int32(w, -1, "input image width");
 DEFINE_int32(b, -1, "input image bands");
 DEFINE_int32(buffer, (100*1024*1024), "buffer size");
 DEFINE_int32(splice, 1, "unite images into one");
-DEFINE_string(m, "", "method for processing: mean or median");
-DEFINE_bool(f, false, "operator with force");
 DEFINE_string(ext, ".tif", "default extension for output decoded image");
 DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
 DEFINE_string(gcp, "", "pos to add gcp to tif");
+DEFINE_int32(fc, 1, "flush cache mode: 0, 1, 2");
 
 bool IsRaw(boost::filesystem::path& file){
   std::string ext;
@@ -246,6 +245,7 @@ int main(int argc, char* argv[]){
             std::cerr << e.what() << std::endl;
             return 2;
         }
+        boost::filesystemEx::pathadaptor adaptor(FLAGS_task);
         GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
         if (src == nullptr) return 1;
         GDALDataset* dst = nullptr;
@@ -254,7 +254,7 @@ int main(int argc, char* argv[]){
         int dst_bands = src->GetRasterCount();
         
         xlingsky::raster::ComboOperator* ops = new xlingsky::raster::ComboOperator;
-        xlingsky::raster::Processor frame( ops,GDT_Float32);
+        xlingsky::raster::Processor frame( ops,GDT_Float32, FLAGS_fc);
         int store_prior[3] = {0,2,1};
         int buffer_size[3] = { src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()};
 		boost::filesystem::path outpath;
@@ -278,7 +278,7 @@ int main(int argc, char* argv[]){
                 std::string a = v.second.get<std::string>("a");
                 std::string b = v.second.get<std::string>("b");
                 xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
-                if (!op->load(a.c_str(), b.c_str())) {
+                if (!op->load(adaptor.absolutepath(a).string().c_str(), adaptor.absolutepath(b).string().c_str())) {
                     std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
                     return 1;
                 }
@@ -288,7 +288,7 @@ int main(int argc, char* argv[]){
             else if (name == "badpixel") {
                 std::string b = v.second.get<std::string>("file");
                 xlingsky::raster::radiometric::BadPixelCorrection* op = new xlingsky::raster::radiometric::BadPixelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
-                if (!op->load( b.c_str())) {
+                if (!op->load( adaptor.absolutepath(b).string().c_str())) {
                     std::cout << "ERROR:badpixel file not loaded a and b" << std::endl;
                     return 1;
                 }
@@ -309,7 +309,7 @@ int main(int argc, char* argv[]){
             }else if(name == "dark"){
               std::string b = v.second.get<std::string>("b");
               xlingsky::raster::radiometric::DarkLevelCorrection* op = new xlingsky::raster::radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
-              if (!op->load(b.c_str())) {
+              if (!op->load(adaptor.absolutepath(b).string().c_str())) {
                 std::cout << "ERROR:dark file not loaded b" << std::endl;
                 return 1;
               }

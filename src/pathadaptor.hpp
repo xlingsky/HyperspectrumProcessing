@@ -11,7 +11,7 @@ class pathadaptor{
  protected:
   boost::filesystem::path _dir;
  public:
-  pathadaptor(boost::filesystem::path& path){
+  pathadaptor(boost::filesystem::path path){
     if(boost::filesystem::is_directory(path))
       _dir = path;
     else{

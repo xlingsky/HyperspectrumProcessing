@@ -50,10 +50,11 @@ class Processor {
   int _storeorder[3];
   DimSeg _seg[3];
   Operator* _op;
+  int _dim_flushcache;
 
  public:
-  Processor(Operator* op, GDALDataType datatype = GDT_Byte)
-      : _op(op), _datatype(datatype) {
+  Processor(Operator* op, GDALDataType datatype = GDT_Byte, int flushcache = -1)
+      : _op(op), _datatype(datatype), _dim_flushcache(flushcache) {
     _storeorder[0] = 0;
     _storeorder[1] = 2;
     _storeorder[2] = 1;
@@ -77,7 +78,13 @@ class Processor {
     }
     return true;
   }
-  bool End(DimSeg& seg, int dim) { return true; }
+  bool End(DimSeg& seg, int dim) { 
+    if(dim==_dim_flushcache) {
+      if(_src.dataset) _src.dataset->FlushCache();
+      if(_dst.dataset) _dst.dataset->FlushCache();
+    }
+    return true; 
+  }
   bool Apply() {
     int store_space[3];
     store_space[_storeorder[0]] = GetDataTypeSize();
