@@ -12,11 +12,9 @@
 #include <boost/algorithm/string.hpp>
 
 #include "pathadaptor.hpp"
-#include "gdalex.hpp"
-#include "decode.h"
-#include "radiometric_correction.hpp"
-#include "SpectrumInterp.hpp"
-#include "RasterProcessor.hpp"
+#include "decode/decode.h"
+#include "raster.hpp"
+#include "raster/gdalex.hpp"
 #include "ipf.hpp"
 #include "pos.h"
 #include "bigfileio.h"
@@ -298,12 +296,12 @@ int main(int argc, char* argv[]){
             else if (name == "gauss") {
                 int band = v.second.get<int>("band");
                 int ksize = v.second.get<int>("ksize");
-                xlingsky::raster::radiometric::GaussianBlur* op = new xlingsky::raster::radiometric::GaussianBlur(ksize, band);
+                xlingsky::raster::blur::GaussianBlur* op = new xlingsky::raster::blur::GaussianBlur(ksize, band);
                 ops->Add(op);
                 boutput = 1;
             }else if (name == "median") {
                 int ksize = v.second.get<int>("ksize");
-                xlingsky::raster::radiometric::MedianBlur* op = new xlingsky::raster::radiometric::MedianBlur(ksize);
+                xlingsky::raster::blur::MedianBlur* op = new xlingsky::raster::blur::MedianBlur(ksize);
                 ops->Add(op);
                 boutput = 1;
             }else if(name == "dark"){

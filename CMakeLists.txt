@@ -10,6 +10,7 @@ find_package(Boost COMPONENTS  filesystem REQUIRED)
 find_package(glog REQUIRED)
 INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES(${GDAL_INCLUDE_DIRS})
+INCLUDE_DIRECTORIES(src/)
 
 SET(OpenMP_LIBS "")
 FIND_PACKAGE(OpenMP)
@@ -24,14 +25,14 @@ endif()
 
 	ADD_DEFINITIONS(-D_LOGGING)
 
-set(decode
+set(hsp
   src/main.cc
-  src/decode.cc
+  src/decode/decode.cc
   src/bigfileio.cc
   src/pos.cc
   src/lx_geometry_rpc.cc
   )
 
-add_executable(decode ${decode})
+add_executable(hsp ${hsp})
 
-target_link_libraries(decode PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS})
+target_link_libraries(hsp PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS})

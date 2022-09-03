@@ -1,5 +1,5 @@
 #include "pos.h"
-#include "decode.h"
+#include "decode/decode.h"
 #include "lx_geometry_rpc.h"
 #include "InterpolatorAdaptor.hpp"
 

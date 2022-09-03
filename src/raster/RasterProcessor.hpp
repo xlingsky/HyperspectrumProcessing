@@ -2,6 +2,7 @@
 #define RASTER_PROCESSOR_HPP
 
 #include "RasterOperator.h"
+#include "TileManager.hpp"
 
 #include <gdal_priv.h>
 #include <numeric>

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <iostream>
 
-#include "gdalex.hpp"
+#include "raster/gdalex.hpp"
 
 #include "bigfileio.h"
 // Segments parse(const Keyword::DataType* data, size_t count, const Keywords& keywords){
