@@ -93,7 +93,7 @@ class Processor {
         GetDataTypeSize() * _seg[_storeorder[0]].second;
     store_space[_storeorder[2]] =
         store_space[_storeorder[1]] * _seg[_storeorder[1]].second;
-    
+
 #ifdef _LOGGING
       VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "RasterIO reading...";
 #endif
@@ -104,10 +104,11 @@ class Processor {
             _seg[1].second, _datatype, _seg[2].second, &_bandlist[0],
             store_space[0], store_space[1], store_space[2]) == CE_None) {
       int store_size[3] = {_seg[0].second, _seg[1].second, _seg[2].second};
+      int imoff[3] = {_src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first, _src.win[2]+_seg[2].first};
 #ifdef _LOGGING
       VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "Operators starting...";
 #endif
-      if (_op->operator()(&_buffer[0], store_size, store_space, _storeorder)) {
+      if (_op->operator()(&_buffer[0], imoff, store_size, store_space, _storeorder)) {
         if (_dst.dataset) {
           int* dst_bandlist = nullptr;
           if (store_size[2] != _seg[2].second) {

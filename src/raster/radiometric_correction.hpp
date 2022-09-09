@@ -100,6 +100,8 @@ bool save(const char* filepath, T* data, size_t count, int newline) {
 }
 
 class PixelCorrection : public FrameIterator {
+ public:
+  typedef float DataType;
  protected:
   int _cols;
   int _rows;
@@ -107,15 +109,11 @@ class PixelCorrection : public FrameIterator {
   std::vector<std::vector<int> > _list;
 
  public:
-  typedef float DataType;
   PixelCorrection(int cols, int rows, int bands)
       : _cols(cols), _rows(bands), _list(rows), _threshold(10) {}
   virtual DataType correct(DataType, int) = 0;
 
-  bool operator()(int r, void* data, int cols, int rows) override {
-    assert(cols == _cols);
-    assert(rows == _rows);
-    size_t sz = (size_t)cols * rows;
+  bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
 // #ifdef _USE_OPENMP
 // #if _USE_OPENMP > 4
@@ -128,15 +126,21 @@ class PixelCorrection : public FrameIterator {
 #pragma omp parallel for
 #endif
 #endif
-    for (int i = 0; i < sz; ++i) {
-      DataType d = correct(pdata[i], i);
-      if (d < 0) {
-        pdata[i] = 0;
+    for (int r=0; r<rows; ++r){
+      size_t i0 = (size_t)(r+yoff)*_cols+xoff;
+      size_t i1 = (size_t)r*cols;
+      for(int c=0; c<cols; ++c){
+        size_t i = i1+c;
+        if(IsNoData(pdata[i])) continue;
+        DataType d = correct(pdata[i], i0+c);
+        if (d < 0) {
+          pdata[i] = 0;
 #ifdef BADPIXEL_COUNTING
-        if (d < -_threshold) _list[r].push_back(i);
+          if (d < -_threshold) _list[b].push_back(i);
 #endif
-      } else
-        pdata[i] = d;
+        } else
+          pdata[i] = d;
+      }
     }
     return true;
   }
@@ -220,12 +224,11 @@ class BadPixelCorrection : public FrameIterator {
     }
     return true;
   }
-  bool operator()(int r, void* data, int cols, int rows) override {
-    assert(cols == _mask.cols);
-    assert(rows == _mask.rows);
+  bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override {
+    cv::Mat mask = _mask(cv::Rect(xoff, yoff, cols, rows));
 
     cv::Mat m(rows, cols, cv::DataType<DataType>::type, data);
-    InpaintOp op(m, m, _mask);
+    InpaintOp op(m, m, mask);
     xlingsky::TileManager manager;
     const int margin = 10;
     const int tilesize = rows;
@@ -252,19 +255,32 @@ class MeanStdCalculator : public FrameIterator {
   std::vector<double> _std;
   int _width;
   char _filepath[512];
+  float _cut_ratio_upper;
+  float _cut_ratio_lower;
 
  public:
   typedef float DataType;
-  MeanStdCalculator(int w) : _width(w) {}
+  MeanStdCalculator(int w, float cut_ratio_lower = 0, float cut_ratio_upper = 0) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper) {}
   ~MeanStdCalculator() { save(_filepath); }
-  std::pair<double, double> compute(DataType* data, int n) {
+  std::pair<double, double> compute(DataType* data, int n, float cut_ratio_lower, float cut_ratio_upper) {
     std::pair<double, double> ret = std::make_pair(0, 0);
-    for (int i = 0; i < n; ++i) {
+    int cnt = 0;
+    std::sort(data, data+n);
+    int st, ed;
+    n = FindValid(data, n, st, ed);
+    st += int(n*cut_ratio_lower);
+    ed -= int(n*cut_ratio_upper);
+
+    int i = st;
+    while(i<=ed){
       ret.first += data[i];
       ret.second += data[i] * data[i];
     }
-    ret.first /= n;
-    ret.second = std::sqrt(ret.second / n - ret.first * ret.first);
+    n = ed-st+1;
+    if(n>0){
+      ret.first /= n;
+      ret.second = std::sqrt(ret.second / n - ret.first * ret.first);
+    }
     return ret;
   }
   void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
@@ -279,7 +295,7 @@ class MeanStdCalculator : public FrameIterator {
 
     return false;
   }
-  bool operator()(int r, void* data, int cols, int rows) override {
+  bool operator()(int b, int , int , void* data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
     std::vector<double> mean(rows), std(rows);
 
@@ -287,7 +303,7 @@ class MeanStdCalculator : public FrameIterator {
 #pragma omp parallel for
 #endif
     for (int r = 0; r < rows; ++r) {
-      auto ret = compute(pdata + r * cols, cols);
+      auto ret = compute(pdata + r * cols, cols, _cut_ratio_lower, _cut_ratio_upper);
       mean[r] = ret.first;
       std[r] = ret.second;
     }
@@ -312,13 +328,15 @@ class MedianCalculator : public FrameIterator {
   void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
   DataType compute(DataType* data, int n) {
     std::sort(data, data + n);
-    return data[n >> 1];
+    int st, ed;
+    FindValid(data, n, st, ed);
+    return data[(st+ed) >> 1];
   }
   bool save(const char* filepath) {
     return ::xlingsky::raster::radiometric::save(filepath, _median.data(), _median.size(),
                                _width);
   }
-  bool operator()(int r, void* data, int cols, int rows) override {
+  bool operator()(int , int , int, void* data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
     std::vector<double> median(rows);
 
@@ -329,6 +347,176 @@ class MedianCalculator : public FrameIterator {
       median[r] = compute(pdata + r * cols, cols);
     }
     _median.insert(_median.end(), median.begin(), median.end());
+    return true;
+  }
+};
+
+class NucCalculator : public FrameIterator{
+ public:
+  typedef float DataType;
+ private:
+  float _cut_ratio_upper;
+  float _cut_ratio_lower;
+  int _sample_maxnum_upper;
+  int _sample_maxnum_lower;
+  int _sample_minnum_upper;
+  int _sample_minnum_lower;
+  float _value_ratio_threshold_upper;
+  float _value_ratio_threshold_lower;
+  bool _a_preferred;
+
+  std::vector<double> _a;
+  std::vector<double> _b;
+  std::vector<int> _badpixels;
+  int _width;
+
+  char _a_path[512];
+  char _b_path[512];
+  char _bp_path[512];
+ public:
+  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.07, float ratio_threshold_upper = 0.07, bool a_preferred = true) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _a_preferred(a_preferred) {}
+  ~NucCalculator() {
+    ::xlingsky::raster::radiometric::save(_a_path, _a.data(), _a.size(), _width);
+    ::xlingsky::raster::radiometric::save(_b_path, _b.data(), _b.size(), _width);
+    ::xlingsky::raster::radiometric::save(_bp_path, _badpixels.data(), _badpixels.size(), _width);
+  }
+  void SetFilePath(const char *apath, const char *bpath, const char *bppath) {
+    strcpy(_a_path, apath);
+    strcpy(_b_path, bpath);
+    strcpy(_bp_path, bppath);
+  }
+  bool operator()(int, int, int, void *data, int cols, int rows) override {
+    DataType* pdata = (DataType*)data;
+    float factor_upper = 1-_value_ratio_threshold_upper;
+    float factor_lower = 1+_value_ratio_threshold_lower;
+    struct BW {
+      double v_lower;
+      double v_upper;
+      int cnt_lower;
+      int cnt_upper;
+      int stat;
+      BW() : cnt_lower(0), cnt_upper(0), v_lower(0), v_upper(0), stat(0) {}
+    };
+    std::vector<BW> bws(rows);
+
+#ifdef _USE_OPENMP
+#pragma omp parallel for
+#endif
+    for (int r = 0; r < rows; ++r) {
+      DataType* t = pdata+r*cols;
+      std::sort( t, t+cols);
+      int st, ed;
+      int n = FindValid(t, cols, st, ed);
+      st += int(n*_cut_ratio_lower);
+      ed -= int(n*_cut_ratio_upper);
+      if (ed - st < 0) {
+        bws[r].stat = rows+1;
+        continue;
+      }
+      int cnt_lower = 1, cnt_upper = 1;
+      double v_lower = (double)t[st], v_upper = (double)t[ed];
+      while (st + cnt_lower < ed && cnt_lower < _sample_maxnum_lower) {
+        double v = v_lower/cnt_lower;
+        v *= factor_lower;
+        if(t[st+cnt_lower]>v) break;
+        v_lower += t[st+cnt_lower];
+        ++cnt_lower;
+      }
+      while (ed-cnt_upper>st && cnt_upper < _sample_maxnum_upper) {
+        double v = v_upper/cnt_upper;
+        v *= factor_upper;
+        if(t[ed-cnt_upper] < v ) break;
+        v_upper += t[ed-cnt_upper];
+        ++cnt_upper;
+      }
+      bws[r].v_lower = v_lower;
+      bws[r].v_upper = v_upper;
+      bws[r].cnt_lower = cnt_lower;
+      bws[r].cnt_upper = cnt_upper;
+      bws[r].stat = (cnt_lower >= _sample_minnum_lower &&
+                     cnt_upper >= _sample_minnum_upper &&
+                     (v_lower / cnt_lower) * factor_lower <
+                     (v_upper / cnt_upper) * factor_upper)?0:1;
+    }
+
+    double sum_v_lower = 0, sum_v_upper = 0;
+    size_t sum_cnt_lower = 0, sum_cnt_upper = 0;
+    size_t sum_stat = 0;
+
+    for (int r=0; r<rows; ++r) {
+      sum_stat += bws[r].stat;
+      if(bws[r].stat) continue;
+      sum_v_lower += bws[r].v_lower;
+      sum_v_upper += bws[r].v_upper;
+      sum_cnt_lower += bws[r].cnt_lower;
+      sum_cnt_upper += bws[r].cnt_upper;
+    }
+
+    if (sum_cnt_lower<1 || sum_cnt_upper<1) {
+      if (sum_stat == rows) {
+        sum_v_upper = 0;
+        sum_cnt_upper = 0;
+        for (int r = 0; r < rows; ++r) {
+          sum_v_upper += bws[r].v_lower+bws[r].v_upper;
+          sum_cnt_upper += bws[r].cnt_lower+bws[r].cnt_upper;
+        }
+        sum_v_upper /= sum_cnt_upper;
+        for (int r = 0; r < rows; ++r) {
+          sum_v_lower = bws[r].v_lower+bws[r].v_upper;
+          sum_cnt_lower = bws[r].cnt_lower+bws[r].cnt_upper;
+          sum_v_lower /= sum_cnt_lower;
+          if (_a_preferred) {
+            _a.push_back(sum_v_upper/sum_v_lower);
+            _b.push_back(0);
+            _badpixels.push_back(0);
+          } else {
+            _a.push_back(1);
+            _b.push_back(sum_v_upper-sum_v_lower);
+            _badpixels.push_back(0);
+          }
+        }
+        return true;
+      }
+      for (int r = 0; r < rows; ++r) {
+        _a.push_back(1);
+        _b.push_back(0);
+        _badpixels.push_back(1);
+      }
+      return false;
+    }
+    sum_v_lower /= sum_cnt_lower;
+    sum_v_upper /= sum_cnt_upper;
+    for (int r=0; r<rows; ++r) {
+      switch (bws[r].stat) {
+      case 0: {
+        auto tu = bws[r].v_upper/bws[r].cnt_upper;
+        auto tl = bws[r].v_lower/bws[r].cnt_lower;
+        _a.push_back(
+            (sum_v_upper-sum_v_lower)/(tu-tl)
+                     );
+        _b.push_back(sum_v_lower-_a.back()*tl);
+        _badpixels.push_back(0);
+      }break;
+      case 1: {
+        auto t = bws[r].v_upper/bws[r].cnt_upper;
+        auto v = std::abs(sum_v_upper-t)<std::abs(sum_v_lower-t)?sum_v_upper:sum_v_lower;
+        if (_a_preferred) {
+          _a.push_back(v/t);
+          _b.push_back(0);
+          _badpixels.push_back(0);
+        } else {
+          _a.push_back(1);
+          _b.push_back(v-t);
+          _badpixels.push_back(0);
+        }
+      }break;
+      default: {
+        _a.push_back(1);
+        _b.push_back(0);
+        _badpixels.push_back(1);
+      }break;
+      }
+    }
     return true;
   }
 };

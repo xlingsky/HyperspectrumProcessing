@@ -30,6 +30,7 @@ DEFINE_int32(splice, 1, "unite images into one");
 DEFINE_string(ext, ".tif", "default extension for output decoded image");
 DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
 DEFINE_string(gcp, "", "pos to add gcp to tif");
+DEFINE_string(nodata, "", "specify the nodata value.");
 DEFINE_int32(fc, 1, "flush cache mode: 0, 1, 2");
 
 bool IsRaw(boost::filesystem::path& file){
@@ -221,7 +222,7 @@ int main(int argc, char* argv[]){
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   if(argc<2){
-    gflags::ShowUsageWithFlagsRestrict(argv[0], "decode");
+    gflags::ShowUsageWithFlagsRestrict(argv[0], "main");
     return 1;
   }
 
@@ -246,11 +247,17 @@ int main(int argc, char* argv[]){
         boost::filesystemEx::pathadaptor adaptor(FLAGS_task);
         GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
         if (src == nullptr) return 1;
+        int nodata_success;
+        double nodata = src->GetRasterBand(1)->GetNoDataValue(&nodata_success);
+        if(!FLAGS_nodata.empty()){
+          nodata = std::stod(FLAGS_nodata);
+          nodata_success = 1;
+        }
         GDALDataset* dst = nullptr;
         int dst_cols = src->GetRasterXSize();
         int dst_rows = src->GetRasterYSize();
         int dst_bands = src->GetRasterCount();
-        
+
         xlingsky::raster::ComboOperator* ops = new xlingsky::raster::ComboOperator;
         xlingsky::raster::Processor frame( ops,GDT_Float32, FLAGS_fc);
         int store_prior[3] = {0,2,1};
@@ -258,8 +265,8 @@ int main(int argc, char* argv[]){
 		boost::filesystem::path outpath;
         int boutput = 0;
         {
-            auto prior = tree.get<std::string>("decode.band_prior", "0,1,2");
-            int boutput = tree.get<int>("decode.output", 0);
+            auto prior = tree.get<std::string>("HSP.dim_prior", "0,1,2");
+            int boutput = tree.get<int>("HSP.output", 0);
 			std::vector<std::string> result;
 			boost::split(result, prior, boost::is_any_of(","));
 			if (result.size() == 3) {
@@ -268,8 +275,8 @@ int main(int argc, char* argv[]){
 				store_prior[2] = std::stoi(result[2]);
 			}
         }
-    
-        BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("decode")) {
+
+        BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("HSP")) {
             if (v.first != "task") continue;
             auto name = v.second.get_child("<xmlattr>.name").get_value<std::string>();
             if (name == "uniform") {
@@ -280,6 +287,7 @@ int main(int argc, char* argv[]){
                     std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
                     return 1;
                 }
+                if(nodata_success) op->SetNoDataValue(nodata);
                 ops->Add(op);
                 boutput = 1;
             }
@@ -296,12 +304,13 @@ int main(int argc, char* argv[]){
             else if (name == "gauss") {
                 int band = v.second.get<int>("band");
                 int ksize = v.second.get<int>("ksize");
-                xlingsky::raster::blur::GaussianBlur* op = new xlingsky::raster::blur::GaussianBlur(ksize, band);
+                int dim = v.second.get<int>("dim", 1);
+                xlingsky::raster::filter::LinearFilter* op = new xlingsky::raster::filter::LinearFilter(ksize, band, dim);
                 ops->Add(op);
                 boutput = 1;
             }else if (name == "median") {
                 int ksize = v.second.get<int>("ksize");
-                xlingsky::raster::blur::MedianBlur* op = new xlingsky::raster::blur::MedianBlur(ksize);
+                xlingsky::raster::filter::MedianBlur* op = new xlingsky::raster::filter::MedianBlur(ksize);
                 ops->Add(op);
                 boutput = 1;
             }else if(name == "dark"){
@@ -311,6 +320,7 @@ int main(int argc, char* argv[]){
                 std::cout << "ERROR:dark file not loaded b" << std::endl;
                 return 1;
               }
+              if(nodata_success) op->SetNoDataValue(nodata);
               ops->Add(op);
 			  boutput = 1;
             }else if(name == "statistic"){
@@ -320,7 +330,9 @@ int main(int argc, char* argv[]){
               dstpath += "_"+method+".txt";
               xlingsky::raster::FrameIterator* op = nullptr;
               if(method=="mean"){
-                xlingsky::raster::radiometric::MeanStdCalculator* p = new xlingsky::raster::radiometric::MeanStdCalculator(buffer_size[store_prior[1]]);
+                float cut_ratio_lower = v.second.get<float>("cut_lower", 0);
+                float cut_ratio_upper = v.second.get<float>("cut_upper", 0);
+                xlingsky::raster::radiometric::MeanStdCalculator* p = new xlingsky::raster::radiometric::MeanStdCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper);
                 p->SetFilePath(dstpath.string().c_str());
                 op = p;
               } else{
@@ -328,47 +340,93 @@ int main(int argc, char* argv[]){
                 p->SetFilePath(dstpath.string().c_str());
                 op = p;
               }
+              if(nodata_success) op->SetNoDataValue(nodata);
+              ops->Add(op);
+            }
+            else if (name == "unc"){
+              float cut_ratio_lower = v.second.get<float>("cut_lower", 0.03);
+              float cut_ratio_upper = v.second.get<float>("cut_upper", 0.1);
+              float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.07);
+              float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.07);
+              bool preferred_a = v.second.get<bool>("a", true);
+              xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, preferred_a);
+              if(nodata_success) op->SetNoDataValue(nodata);
+              char apath[512], bpath[512], bppath[512];
+              boost::filesystem::path dstpath;
+              if(FLAGS_o.empty()){
+                dstpath = path;
+              }else{
+                dstpath = FLAGS_o;
+                if(boost::filesystem::is_directory(dstpath)){
+                  dstpath /= path.filename();
+                }
+              }
+              dstpath.replace_extension();
+              dstpath += "_";
+              {
+                boost::filesystem::path t;
+                t = dstpath;
+                t += "a.txt";
+                strcpy(apath, t.string().c_str());
+                t = dstpath;
+                t += "b.txt";
+                strcpy(bpath, t.string().c_str());
+                t = dstpath;
+                t += "badpixels.txt";
+                strcpy(bppath, t.string().c_str());
+              }
+              op->SetFilePath(apath, bpath, bppath);
               ops->Add(op);
             }
             else if (name == "interp" && !outpath.empty()) {
-                std::vector<double> wl_old, wl_new;
-                xlingsky::raster::spectrum::Interpolator::InterpType type;
-                {
-					std::string w0 = v.second.get<std::string>("wl0");
-					std::string w1 = v.second.get<std::string>("wl1");
+              std::vector<double> wl_old, wl_new;
+              xlingsky::raster::spectrum::Interpolator::InterpType type;
+              int num_lines = src->GetRasterXSize(), num_samples_old = src->GetRasterCount(), num_samples_new;
+              {
+                std::string w0 = v.second.get<std::string>("wl0");
+                std::string w1 = v.second.get<std::string>("wl1");
 
-					std::vector<std::string> result;
-					boost::split(result, w0, boost::is_any_of(", ;"));
-                    for (auto& r : result)
-                        wl_old.push_back(std::stod(r));
-					boost::split(result, w1, boost::is_any_of(", ;"));
-                    for (auto& r : result)
-                        wl_new.push_back(std::stod(r));
-                    if (wl_old.size() != src->GetRasterCount()) {
-                        std::cout << "ERROR: interp wl length MISMATCH" << std::endl;
-						GDALClose(src);
-						return 1;
-                    }
+                std::vector<std::string> result;
+                boost::split(result, w0, boost::is_any_of(", ;"));
+                for (auto& r : result)
+                  wl_old.push_back(std::stod(r));
+                boost::split(result, w1, boost::is_any_of(", ;"));
+                for (auto& r : result)
+                  wl_new.push_back(std::stod(r));
 
-					std::string t = v.second.get<std::string>("type", "pchip");
-                    if (t == "spline_cubic")
-                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_CUBIC;
-                    else if(t=="spline_quintic")
-                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUINTIC;
-                    else if(t=="spline_quadratic")
-                        type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUADRATIC;
-                    else if(t=="makima")
-                        type = xlingsky::raster::spectrum::Interpolator::MAKIMA;
-                    else if(t=="barycentric")
-                        type = xlingsky::raster::spectrum::Interpolator::BARYCENTRIC;
-                    else
-                        type = xlingsky::raster::spectrum::Interpolator::PCHIP;
+                bool flag = false;
+                if(wl_old.size()==num_samples_old){
+                  num_samples_new = wl_new.size();
+                  flag = true;
+                }else if(wl_old.size()==(size_t)num_samples_old*num_lines){
+                  num_samples_new = wl_new.size()/num_lines;
+                  if(num_samples_new>0) flag = true;
                 }
-                dst_bands = wl_new.size();
-                xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(std::move(wl_old), std::move(wl_new));
-                op->SetInterpType(type);
-                ops->Add(op);
-                boutput = 1;
+                if (!flag) {
+                  std::cout << "ERROR: interp wl length MISMATCH" << std::endl;
+                  GDALClose(src);
+                  return 1;
+                }
+
+                std::string t = v.second.get<std::string>("type", "pchip");
+                if (t == "spline_cubic")
+                  type = xlingsky::raster::spectrum::Interpolator::BSPLINE_CUBIC;
+                else if(t=="spline_quintic")
+                  type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUINTIC;
+                else if(t=="spline_quadratic")
+                  type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUADRATIC;
+                else if(t=="makima")
+                  type = xlingsky::raster::spectrum::Interpolator::MAKIMA;
+                else if(t=="barycentric")
+                  type = xlingsky::raster::spectrum::Interpolator::BARYCENTRIC;
+                else
+                  type = xlingsky::raster::spectrum::Interpolator::PCHIP;
+              }
+              dst_bands = num_samples_new;
+              xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(num_lines, wl_old, num_samples_old, wl_new, num_samples_new);
+              op->SetInterpType(type);
+              ops->Add(op);
+              boutput = 1;
             }
         }
 		if (boutput) {
