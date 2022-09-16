@@ -346,10 +346,12 @@ int main(int argc, char* argv[]){
             else if (name == "unc"){
               float cut_ratio_lower = v.second.get<float>("cut_lower", 0.03);
               float cut_ratio_upper = v.second.get<float>("cut_upper", 0.1);
-              float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.07);
-              float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.07);
+              float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.03);
+              float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.03);
+              int tile_size = v.second.get<int>("tile_size", std::numeric_limits<int>::max());
+              int tile_overlap = v.second.get<int>("tile_overlap", 5);
               bool preferred_a = v.second.get<bool>("a", true);
-              xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, preferred_a);
+              xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
               if(nodata_success) op->SetNoDataValue(nodata);
               char apath[512], bpath[512], bppath[512];
               boost::filesystem::path dstpath;
@@ -454,8 +456,10 @@ int main(int argc, char* argv[]){
         if (buffer_size[2] < dst_bands) buffer_size[2] = dst_bands;
         {
             size_t max_buffer_size = (size_t)1024 * 1024 * 1024;
-            buffer_size[store_prior[2]] = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
-            if (buffer_size[store_prior[2]] == 0) buffer_size[store_prior[2]] = 1;
+            int l = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
+            if (l == 0) l = 1;
+            if (buffer_size[store_prior[2]]>l)
+                buffer_size[store_prior[2]] = l;
         }
 		frame.ReserveBufferSize((size_t)buffer_size[0] * buffer_size[1] * buffer_size[2]);
         if (src->GetRasterCount() < buffer_size[2])  buffer_size[2] = src->GetRasterCount();

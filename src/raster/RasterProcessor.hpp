@@ -17,6 +17,7 @@ namespace xlingsky {
 
 namespace raster {
 
+//all indices starting from 0
 struct Patch {
   GDALDataset* dataset;
   int win[6];
@@ -24,7 +25,7 @@ struct Patch {
   void SetDataset(GDALDataset* d) {
     dataset = d;
     if (dataset)
-      SetWin(0, dataset->GetRasterXSize(), 0, dataset->GetRasterYSize(), 1,
+      SetWin(0, dataset->GetRasterXSize(), 0, dataset->GetRasterYSize(), 0,
              dataset->GetRasterCount());
   }
   void SetWin(int xoff, int xsize, int yoff, int ysize, int bandoff,
@@ -75,7 +76,7 @@ class Processor {
     _seg[dim] = seg;
     if (dim == 2) {
       _bandlist.resize(seg.second);
-      std::iota(_bandlist.begin(), _bandlist.end(), _src.win[2] + seg.first);
+      std::iota(_bandlist.begin(), _bandlist.end(), _src.win[2] + seg.first + 1);
     }
     return true;
   }
@@ -114,7 +115,7 @@ class Processor {
           if (store_size[2] != _seg[2].second) {
             dst_bandlist = new int[store_size[2]];
             std::iota(dst_bandlist, dst_bandlist + store_size[2],
-                      _dst.win[2] + _seg[2].first);
+                      _dst.win[2] + _seg[2].first + 1);
           }
 #ifdef _LOGGING
         VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "RasterIO writing..." ;

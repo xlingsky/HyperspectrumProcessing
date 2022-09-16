@@ -9,6 +9,14 @@
 #include "inpaint.hpp"
 #include "TileManager.hpp"
 
+//#define DEBUG
+
+#if defined(DEBUG) || defined(_DEBUG)
+#include <boost/dll/runtime_symbol_info.hpp>
+#include "raster/gdalex.hpp"
+#include "raster/gdal_traits.hpp"
+#endif
+
 // #include <sstream>
 //#define BADPIXEL_COUNTING
 
@@ -354,6 +362,10 @@ class MedianCalculator : public FrameIterator {
 class NucCalculator : public FrameIterator{
  public:
   typedef float DataType;
+  enum Mode{
+    SCALE,
+    OFFSET
+  };
  private:
   float _cut_ratio_upper;
   float _cut_ratio_lower;
@@ -361,9 +373,11 @@ class NucCalculator : public FrameIterator{
   int _sample_maxnum_lower;
   int _sample_minnum_upper;
   int _sample_minnum_lower;
+  int _line_tile_size;
+  int _line_tile_overlap;
   float _value_ratio_threshold_upper;
   float _value_ratio_threshold_lower;
-  bool _a_preferred;
+  int _mode;
 
   std::vector<double> _a;
   std::vector<double> _b;
@@ -374,7 +388,7 @@ class NucCalculator : public FrameIterator{
   char _b_path[512];
   char _bp_path[512];
  public:
-  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.07, float ratio_threshold_upper = 0.07, bool a_preferred = true) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _a_preferred(a_preferred) {}
+  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 5, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {}
   ~NucCalculator() {
     ::xlingsky::raster::radiometric::save(_a_path, _a.data(), _a.size(), _width);
     ::xlingsky::raster::radiometric::save(_b_path, _b.data(), _b.size(), _width);
@@ -385,7 +399,7 @@ class NucCalculator : public FrameIterator{
     strcpy(_b_path, bpath);
     strcpy(_bp_path, bppath);
   }
-  bool operator()(int, int, int, void *data, int cols, int rows) override {
+  bool operator()(int b, int, int, void *data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
     float factor_upper = 1-_value_ratio_threshold_upper;
     float factor_lower = 1+_value_ratio_threshold_lower;
@@ -438,57 +452,83 @@ class NucCalculator : public FrameIterator{
                      (v_lower / cnt_lower) * factor_lower <
                      (v_upper / cnt_upper) * factor_upper)?0:1;
     }
+      
+// #if defined(DEBUG) || defined(_DEBUG)
+//       {
+//           boost::filesystem::path dirpath(boost::dll::program_location().parent_path());
+//           boost::filesystem::path filepath = dirpath;
+//           char name[128];
+//           sprintf(name, "b%d.tif", b);
+//           filepath /= name;
+//           GDALDataset* dataset = GDALCreate(filepath.string().c_str(), cols, rows, 1, GDT_UInt16);
+//           if(dataset->RasterIO(GF_Write, 0, 0, cols, rows, data, cols, rows, gdal::DataType<DataType>::type(), 1, nullptr, 0, 0, 0)){}
+//           GDALClose(dataset);
+//       }
+// #endif
 
-    double sum_v_lower = 0, sum_v_upper = 0;
-    size_t sum_cnt_lower = 0, sum_cnt_upper = 0;
-    size_t sum_stat = 0;
+    xlingsky::TileManager manager;
+    manager.AppendDimension(rows, _line_tile_size, _line_tile_overlap, _line_tile_overlap);
 
-    for (int r=0; r<rows; ++r) {
-      sum_stat += bws[r].stat;
-      if(bws[r].stat) continue;
-      sum_v_lower += bws[r].v_lower;
-      sum_v_upper += bws[r].v_upper;
-      sum_cnt_lower += bws[r].cnt_lower;
-      sum_cnt_upper += bws[r].cnt_upper;
+    std::vector<BW> tile_sum(manager.Size(0));
+    for(int t=0; t<manager.Size(0); ++t){
+      auto seg = manager.Segment(0, t);
+      auto& sum = tile_sum[t];
+      for(int r=seg.first; r<seg.first+seg.second; ++r){
+        sum.stat += bws[r].stat;
+        if(bws[r].stat) continue;
+        sum.v_lower += bws[r].v_lower;
+        sum.v_upper += bws[r].v_upper;
+        sum.cnt_lower += bws[r].cnt_lower;
+        sum.cnt_upper += bws[r].cnt_upper;
+      }
+    }
+    for(int t=0; t<tile_sum.size(); ++t){
     }
 
-    if (sum_cnt_lower<1 || sum_cnt_upper<1) {
-      if (sum_stat == rows) {
-        sum_v_upper = 0;
-        sum_cnt_upper = 0;
-        for (int r = 0; r < rows; ++r) {
-          sum_v_upper += bws[r].v_lower+bws[r].v_upper;
-          sum_cnt_upper += bws[r].cnt_lower+bws[r].cnt_upper;
-        }
-        sum_v_upper /= sum_cnt_upper;
-        for (int r = 0; r < rows; ++r) {
-          sum_v_lower = bws[r].v_lower+bws[r].v_upper;
-          sum_cnt_lower = bws[r].cnt_lower+bws[r].cnt_upper;
-          sum_v_lower /= sum_cnt_lower;
-          if (_a_preferred) {
-            _a.push_back(sum_v_upper/sum_v_lower);
-            _b.push_back(0);
-            _badpixels.push_back(0);
-          } else {
+    std::vector<double> dn_high(rows), dn_low(rows);
+
+    for(int t=0; t<manager.Size(0); ++t){
+      auto seg = manager.Segment(0, t);
+      int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
+      auto& sum = tile_sum[t];
+      if (sum.cnt_lower<1 || sum.cnt_upper<1) {
+        if (sum.stat == seg.second) {
+          sum.v_upper = 0;
+          sum.cnt_upper = 0;
+          for (int r = seg.first; r < seg.first + seg.second; ++r) {
+            sum.v_upper += bws[r].v_upper+bws[r].v_lower;
+            sum.cnt_upper += bws[r].cnt_upper+bws[r].cnt_lower;
+          }
+          sum.v_upper /= sum.cnt_upper;
+          for (int r = seg.first; r < seg.first + tilesize; ++r) {
+            sum.v_lower = bws[r].v_lower+bws[r].v_upper;
+            sum.cnt_lower = bws[r].cnt_lower+bws[r].cnt_upper;
+            sum.v_lower /= sum.cnt_lower;
+            switch(_mode){
+              case OFFSET:{
+                _a.push_back(1);
+                _b.push_back(sum.v_upper-sum.v_lower);
+                _badpixels.push_back(0);
+              }break;
+              default:{
+                _a.push_back(sum.v_upper/sum.v_lower);
+                _b.push_back(0);
+                _badpixels.push_back(0);
+              };
+            }
+          }
+        }else{
+          for (int r = 0; r < tilesize; ++r) {
             _a.push_back(1);
-            _b.push_back(sum_v_upper-sum_v_lower);
-            _badpixels.push_back(0);
+            _b.push_back(0);
+            _badpixels.push_back(1);
           }
         }
-        return true;
+        continue;
       }
-      for (int r = 0; r < rows; ++r) {
-        _a.push_back(1);
-        _b.push_back(0);
-        _badpixels.push_back(1);
-      }
-      return false;
-    }
-    sum_v_lower /= sum_cnt_lower;
-    sum_v_upper /= sum_cnt_upper;
-    for (int r=0; r<rows; ++r) {
-      switch (bws[r].stat) {
-      case 0: {
+      double sum_v_lower = sum.v_lower/sum.cnt_lower;
+      double sum_v_upper = sum.v_upper/sum.cnt_upper;
+      for (int r=seg.first; r<seg.first+tilesize; ++r) {
         auto tu = bws[r].v_upper/bws[r].cnt_upper;
         auto tl = bws[r].v_lower/bws[r].cnt_lower;
         _a.push_back(
@@ -496,27 +536,9 @@ class NucCalculator : public FrameIterator{
                      );
         _b.push_back(sum_v_lower-_a.back()*tl);
         _badpixels.push_back(0);
-      }break;
-      case 1: {
-        auto t = bws[r].v_upper/bws[r].cnt_upper;
-        auto v = std::abs(sum_v_upper-t)<std::abs(sum_v_lower-t)?sum_v_upper:sum_v_lower;
-        if (_a_preferred) {
-          _a.push_back(v/t);
-          _b.push_back(0);
-          _badpixels.push_back(0);
-        } else {
-          _a.push_back(1);
-          _b.push_back(v-t);
-          _badpixels.push_back(0);
-        }
-      }break;
-      default: {
-        _a.push_back(1);
-        _b.push_back(0);
-        _badpixels.push_back(1);
-      }break;
       }
     }
+
     return true;
   }
 };
