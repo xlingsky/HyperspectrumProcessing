@@ -14,6 +14,10 @@ class Operator {
   virtual ~Operator() {}
   virtual bool operator()(void* data, int imoff[3], int size[3], int space[3],
                           int prior[3]) = 0;
+  void SetVerbosity(int v) { _verbose = v; }
+  int verbosity() const { return _verbose; }
+private:
+  int _verbose;
 };
 
 class ComboOperator : public Operator {

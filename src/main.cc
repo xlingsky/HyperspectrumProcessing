@@ -4,6 +4,7 @@
 #include <glog/logging.h>
 #include <set>
 #include <iostream>
+#include <limits>
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -348,12 +349,12 @@ int main(int argc, char* argv[]){
               float cut_ratio_upper = v.second.get<float>("cut_upper", 0.1);
               float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.03);
               float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.03);
-              int tile_size = v.second.get<int>("tile_size", std::numeric_limits<int>::max());
+              int tile_size = v.second.get<int>("tile_size", (std::numeric_limits<int>::max)());
               int tile_overlap = v.second.get<int>("tile_overlap", 5);
               bool preferred_a = v.second.get<bool>("a", true);
               xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
               if(nodata_success) op->SetNoDataValue(nodata);
-              char apath[512], bpath[512], bppath[512];
+              char apath[512], bpath[512], bppath[512], xmlpath[512];
               boost::filesystem::path dstpath;
               if(FLAGS_o.empty()){
                 dstpath = path;
@@ -376,8 +377,11 @@ int main(int argc, char* argv[]){
                 t = dstpath;
                 t += "badpixels.txt";
                 strcpy(bppath, t.string().c_str());
+                t = dstpath;
+                t += "uniform.xml";
+                strcpy(xmlpath, t.string().c_str());
               }
-              op->SetFilePath(apath, bpath, bppath);
+              op->SetFilePath(apath, bpath, bppath, xmlpath);
               ops->Add(op);
             }
             else if (name == "interp" && !outpath.empty()) {

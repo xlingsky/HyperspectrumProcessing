@@ -3,7 +3,9 @@
 
 #include <assert.h>
 #include <vector>
-#include <fstream>
+#include <sstream>
+#include <string>
+#include <boost/filesystem.hpp>
 
 #include "RasterOperator.h"
 #include "inpaint.hpp"
@@ -17,6 +19,10 @@
 #include "raster/gdal_traits.hpp"
 #endif
 
+#ifdef _LOGGING
+#include <glog/logging.h>
+#define _LOG_LEVEL_RADIOMETRIC 1
+#endif
 // #include <sstream>
 //#define BADPIXEL_COUNTING
 
@@ -78,7 +84,12 @@ void Tile(int width, int height, int tilesize, int margin, TileOp& op) {
 template <typename T>
 bool load(const char* filepath, size_t count, T* data) {
   FILE* fp = fopen(filepath, "r");
-  if (fp == nullptr) return false;
+  if (fp == nullptr) {
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "CANNOT open " << filepath;
+#endif
+    return false;
+  }
   size_t i;
   for (i = 0; i < count; ++i) {
     double t;
@@ -88,22 +99,35 @@ bool load(const char* filepath, size_t count, T* data) {
 
   fclose(fp);
 
+#ifdef _LOGGING
+  if (i!=count) {
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "ERROR format " << filepath;
+  }
+#endif
+
   return i == count;
 }
 
 template <typename T>
 bool save(const char* filepath, T* data, size_t count, int newline) {
-  std::ofstream fp(filepath);
-  if (!fp.is_open()) return false;
+  std::ostringstream out;
   size_t i = 0;
   while (i < count) {
-    fp << data[i] << "\t";
+    out << data[i] << "\t";
     ++i;
     if (i % newline == 0) {
-      fp << std::endl;
+      out << std::endl;
     }
   }
-  fp.close();
+  FILE* fp = fopen(filepath, "w");
+  if (fp == nullptr) {
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "CANNOT create " << filepath;
+#endif
+    return false;
+  }
+  fputs(out.str().c_str(), fp);
+  fclose(fp);
   return true;
 }
 
@@ -387,17 +411,52 @@ class NucCalculator : public FrameIterator{
   char _a_path[512];
   char _b_path[512];
   char _bp_path[512];
+  char _xml_path[512];
  public:
-  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 5, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {}
-  ~NucCalculator() {
-    ::xlingsky::raster::radiometric::save(_a_path, _a.data(), _a.size(), _width);
-    ::xlingsky::raster::radiometric::save(_b_path, _b.data(), _b.size(), _width);
-    ::xlingsky::raster::radiometric::save(_bp_path, _badpixels.data(), _badpixels.size(), _width);
+  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 5, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
+    _a_path[0] = _b_path[0] = _bp_path[0] = _xml_path[0] = 0;
   }
-  void SetFilePath(const char *apath, const char *bpath, const char *bppath) {
-    strcpy(_a_path, apath);
-    strcpy(_b_path, bpath);
-    strcpy(_bp_path, bppath);
+  ~NucCalculator() {
+    if(_a_path[0]) {
+      if(::xlingsky::raster::radiometric::save(_a_path, _a.data(), _a.size(), _width)){
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "Linear factor was saved to " << _a_path;
+#endif
+      }
+    }
+    if(_b_path[0] && ::xlingsky::raster::radiometric::save(_b_path, _b.data(), _b.size(), _width)){
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "Offset factor was saved to " << _b_path;
+#endif
+    }
+    if(_bp_path[0] && ::xlingsky::raster::radiometric::save(_bp_path, _badpixels.data(), _badpixels.size(), _width)) {
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "bad pixel list was saved to " << _bp_path;
+#endif
+    }
+    if(_xml_path[0] && _a_path[0] && _b_path[0]){
+      FILE* fp = fopen(_xml_path, "w");
+      if(fp){
+        fprintf(fp, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+        fprintf(fp, "<HSP>\n");
+        fprintf(fp, "\t<dim_prior>0,2,1</dim_prior>\n");
+        fprintf(fp, "\t<task name=\"uniform\">\n");
+        fprintf(fp, "\t\t<a>%s</a>\n", _a_path);
+        fprintf(fp, "\t\t<b>%s</b>\n", _b_path);
+        fprintf(fp, "\t</task>\n");
+        fprintf(fp, "</HSP>\n");
+        fclose(fp);
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "UNC xml was saved to " << _xml_path;
+#endif
+      }
+    }
+  }
+  void SetFilePath(const char *apath, const char *bpath, const char *bppath, const char* xmlpath) {
+    if(apath) strcpy(_a_path, apath);
+    if(bpath) strcpy(_b_path, bpath);
+    if(bppath) strcpy(_bp_path, bppath);
+    if(xmlpath) strcpy(_xml_path, xmlpath);
   }
   bool operator()(int b, int, int, void *data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
@@ -452,7 +511,7 @@ class NucCalculator : public FrameIterator{
                      (v_lower / cnt_lower) * factor_lower <
                      (v_upper / cnt_upper) * factor_upper)?0:1;
     }
-      
+
 // #if defined(DEBUG) || defined(_DEBUG)
 //       {
 //           boost::filesystem::path dirpath(boost::dll::program_location().parent_path());
@@ -482,8 +541,8 @@ class NucCalculator : public FrameIterator{
         sum.cnt_upper += bws[r].cnt_upper;
       }
     }
-    for(int t=0; t<tile_sum.size(); ++t){
-    }
+    // for(int t=0; t<tile_sum.size(); ++t){
+    // }
 
     std::vector<double> dn_high(rows), dn_low(rows);
 
@@ -529,8 +588,20 @@ class NucCalculator : public FrameIterator{
       double sum_v_lower = sum.v_lower/sum.cnt_lower;
       double sum_v_upper = sum.v_upper/sum.cnt_upper;
       for (int r=seg.first; r<seg.first+tilesize; ++r) {
+        if (bws[r].stat > 1) {
+        _a.push_back(1);
+        _b.push_back(0);
+        _badpixels.push_back(1);
+        continue;
+        }
         auto tu = bws[r].v_upper/bws[r].cnt_upper;
         auto tl = bws[r].v_lower/bws[r].cnt_lower;
+        if (tu - tl < std::numeric_limits<double>::epsilon()) {
+        _a.push_back(1);
+        _b.push_back(0);
+        _badpixels.push_back(1);
+        continue;
+        }
         _a.push_back(
             (sum_v_upper-sum_v_lower)/(tu-tl)
                      );
