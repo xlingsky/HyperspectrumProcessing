@@ -14,7 +14,7 @@ def getFilePath(dirpath, filename):
 
 class decodeRunner:
     def __init__(self):
-        self._decode = r'E:\xlingsky\repo\HyperspectrumProcessing\build\Release\decode.exe'
+        self._decode = r'E:\xlingsky\repo\HyperspectrumProcessing\build\Release\hsp.exe'
         self._rar = "\"C:\\Program Files\\WinRAR\\Rar.exe\""
         self._rm = 'rm '
 
@@ -36,156 +36,110 @@ class decodeRunner:
     def vnir(self, src, dstdir = r'H:\jinchang\ws\vnir'):
         strips = copy.deepcopy(src)
         config_radiometric = r'D:\jinchang\config\vnir\radiometric.xml'
-        dir_radiometric = os.path.join(dstdir, '1_radio')
-        xrange= [0, 1535]
-        # xrange= [300, 1649]
-        if not os.path.exists(dir_radiometric):
-            os.mkdir(dir_radiometric)
-        tsk_radiometric = os.path.join(dstdir, '1_radio.bat')
-        with open(tsk_radiometric,'w') as f:
-            for strip in strips:
-                radiolist = list()
-                for pos in strip[1]:
-                    img = os.path.splitext(pos)[0]+'.dat'
-                    name = strip[0]+'_'+os.path.splitext(os.path.basename(img))[0]
-                    dstpath = os.path.join(dir_radiometric, name)+'.tif'
-                    dataset = gdal.Open(img)
-                    if not dataset:
-                        print('NOT FOUND {}\n'.format(img))
-                        continue
-                    # f.write('{} -task {} {} -o {}\n'.format(self._decode, config_radiometric, img, dstpath))
-                    f.write('gdal_translate -b 50 {} {}\n'.format(img, dstpath))
-                    radiolist.append([dstpath, dataset.RasterXSize, dataset.RasterYSize])
-                strip.append(radiolist)
-        dir_cut = os.path.join(dstdir, '2_cut')
-        if not os.path.exists(dir_cut):
-            os.mkdir(dir_cut)
-        tsk_cut = os.path.join(dstdir,'2_cut.bat')
-        with open(tsk_cut,'w') as f:
+        #xrange= [0, 1535]
+        xrange= [300, 1649]
+        
+        dirpath = os.path.join(dstdir, '1_cut')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        tsk = os.path.join(dstdir,'1_cut.bat')
+        with open(tsk,'w') as f:
             hdr = 'gdal_translate -srcwin {} {} {} '.format(xrange[0], 0, xrange[1]-xrange[0]+1)
             for strip in strips:
                 cutlist = list()
-                for img in strip[2]:
-                    dstpath = os.path.join(dir_cut, os.path.basename(img[0]))
+                for img in strip[1]:                  
+                    name = '{:0>4d}'.format(int(strip[0]))+os.path.splitext(os.path.basename(img[0]))[0]
+                    dstpath = os.path.join(dirpath, name)+'.tif'
                     f.write('{} {} {} {}\n'.format(hdr, img[2], img[0], dstpath))
+                    dataset = None
                     cutlist.append(dstpath)
                 strip.append(cutlist)
-        with open(os.path.join(dstdir,'2_poscopy.bat'), 'w') as f:
+
+        dirpath = os.path.join(dstdir, 'x_pos')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        with open(os.path.join(dstdir,'x_poscopy.bat'), 'w') as f:
             for strip in strips:
-                for p in strip[1]:
-                    pos = os.path.splitext(p)[0]+'.aux'
+                for img in strip[1]:
+                    p = img[0]
+                    pos = os.path.splitext(p)[0]+'.pos'
                     name = strip[0]+'_'+os.path.basename(pos)
-                    f.write('cp {} {}\n'.format(pos, os.path.join(dir_cut, name)))
-        dir_strip = os.path.join(dstdir, '3_strip')
-        if not os.path.exists(dir_strip):
-            os.mkdir(dir_strip)
-        dir_strip_tsk = os.path.join(dir_strip, 'tsk')
+                    f.write('cp {} {}\n'.format(pos, os.path.join(dirpath, name)))
+        dirpath = os.path.join(dstdir, '2_strip')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        dir_strip_tsk = os.path.join(dirpath, 'tsk')
         if not os.path.exists(dir_strip_tsk):
             os.mkdir(dir_strip_tsk)
-        dir_strip_prod = os.path.join(dir_strip,'product')
+        dir_strip_prod = os.path.join(dirpath,'product')
         if not os.path.exists(dir_strip_prod):
             os.mkdir(dir_strip_prod)
-        tsk_strip = os.path.join(dstdir, '3_strip.bat')
-        with open(tsk_strip,'w') as f:
+        tsk = os.path.join(dstdir, '2_strip.bat')
+        with open(tsk,'w') as f:
             for strip in strips:
                 imglist = os.path.join(dir_strip_tsk,'{}.txt'.format(strip[0]))
                 with open(imglist, 'w') as l:
-                    for img in strip[3]:
-                        l.write('{}\n'.format(img))
-                fname = os.path.splitext(os.path.basename(strip[1][0]))[0]
-                lname = os.path.splitext(os.path.basename(strip[1][-1]))[0]
+                    for img in strip[1]:
+                        l.write('{}\n'.format(img[0]))
+                fname = os.path.splitext(os.path.basename(strip[1][0][0]))[0]
+                lname = os.path.splitext(os.path.basename(strip[1][-1][0]))[0]
                 dstpath = os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)+'.tif'
                 f.write('{} {} -o {}\n'.format(self._decode,imglist, dstpath))
                 strip.append(dstpath)
-        tsk_gcp = os.path.join(dstdir, "4_gcp.bat")
-        with open(tsk_gcp,'w') as f:
-            for strip in strips:
-                f.write('{} -gcp {} {}\n'.format(self._decode, os.path.splitext(strip[4])[0]+".aux", strip[4]))
-        tsk_warp = os.path.join(dstdir, "5_warp.bat")
-        dir_warp = os.path.join(dstdir,'geo')
-        if not os.path.exists(dir_warp):
-            os.mkdir(dir_warp)
-        with open(tsk_warp,'w') as f:
-            for i,strip in enumerate(strips):
-                dstpath = os.path.join(dir_warp,os.path.basename(strip[4]))
-                f.write('gdalwarp {} {}\n'.format( strip[4], dstpath))
+        
 
 
-    def swir(self, strips, dstdir = r'D:\jinchang\ws\swir'):
-        config_radiometric = r'D:\jinchang\config\swir\radiometric.xml'
-        dir_radiometric = os.path.join(dstdir, '1_radio')
+    def swir(self, src, dstdir = r'D:\jinchang\ws\swir'):
+        strips = copy.deepcopy(src)
         xrange= [0, 1535]
-        if not os.path.exists(dir_radiometric):
-            os.mkdir(dir_radiometric)
-        tsk_radiometric = os.path.join(dstdir, '1_radio.bat')
-        with open(tsk_radiometric,'w') as f:
-            for strip in strips:
-                radiolist = list()
-                for pos in strip[1]:
-                    img = os.path.splitext(pos)[0]+'.dat'
-                    name = strip[0]+'_'+os.path.splitext(os.path.basename(img))[0]
-                    dstpath = os.path.join(dir_radiometric, name)+'.tif'
-                    dataset = gdal.Open(img)
-                    if not dataset:
-                        print('NOT FOUND {}\n'.format(img))
-                        continue
-                    f.write('{} -task {} {} -o {}\n'.format(self._decode, config_radiometric, img, dstpath))
-                    radiolist.append([dstpath, dataset.RasterXSize, dataset.RasterYSize])
-                strip.append(radiolist)
-        dir_cut = os.path.join(dstdir, '2_cut')
-        if not os.path.exists(dir_cut):
-            os.mkdir(dir_cut)
-        tsk_cut = os.path.join(dstdir,'2_cut.bat')
-        with open(tsk_cut,'w') as f:
+        
+        dirpath = os.path.join(dstdir, '1_cut')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        tsk = os.path.join(dstdir,'1_cut.bat')
+        with open(tsk,'w') as f:
             hdr = 'gdal_translate -srcwin {} {} {} '.format(xrange[0], 0, xrange[1]-xrange[0]+1)
             for strip in strips:
                 cutlist = list()
-                for img in strip[2]:
-                    dstpath = os.path.splitext(os.path.join(dir_cut, os.path.basename(img[0])))[0]+"_SW.tif"
+                for img in strip[1]:                  
+                    name = '{:0>4d}'.format(int(strip[0])*100)+os.path.splitext(os.path.basename(img[0]))[0]
+                    dstpath = os.path.join(dirpath, name)+'.tif'
                     f.write('{} {} {} {}\n'.format(hdr, img[2], img[0], dstpath))
+                    dataset = None
                     cutlist.append(dstpath)
                 strip.append(cutlist)
 
-        dir_destripe = os.path.join(dstdir, '3_destripe')
-        if not os.path.exists(dir_destripe):
-            os.mkdir(dir_destripe)
-        tsk_destripe = os.path.join(dstdir,'3_destripe.bat')
-        destripe_exe = r'E:\xlingsky\repo\WHU-HyDenoise-GF5\WHU-HyDenoise-GF5.exe'
-        destripe_config = r'E:\xlingsky\repo\WHU-HyDenoise-GF5\GF5_AHSI.xml'
-        with open(tsk_destripe,'w') as f:
+        dirpath = os.path.join(dstdir, 'x_pos')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        with open(os.path.join(dstdir,'x_poscopy.bat'), 'w') as f:
             for strip in strips:
-                destripelist = list()
-                for img in strip[3]:
-                    dstpath = os.path.join(dir_destripe, os.path.basename(img))
-                    f.write('{} {} {} {}\n'.format(destripe_exe, img, destripe_config, dstpath))
-                    destripelist.append(dstpath)
-                strip.append(destripelist)
-
-        with open(os.path.join(dstdir,'3_poscopy.bat'), 'w') as f:
-            for strip in strips:
-                for p in strip[1]:
-                    pos = os.path.splitext(p)[0]+'.aux'
-                    name = strip[0]+'_'+os.path.splitext(os.path.basename(pos))[0]
-                    f.write('cp {} {}\n'.format(pos, os.path.join(dir_destripe, name+"_SW.aux")))
-        dir_strip = os.path.join(dstdir, '4_strip')
-        if not os.path.exists(dir_strip):
-            os.mkdir(dir_strip)
-        dir_strip_tsk = os.path.join(dir_strip, 'tsk')
+                for img in strip[1]:
+                    p = img[0]
+                    pos = os.path.splitext(p)[0]+'.pos'
+                    name = strip[0]+'_'+os.path.basename(pos)
+                    f.write('cp {} {}\n'.format(pos, os.path.join(dirpath, name)))
+        dirpath = os.path.join(dstdir, '2_strip')
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        dir_strip_tsk = os.path.join(dirpath, 'tsk')
         if not os.path.exists(dir_strip_tsk):
             os.mkdir(dir_strip_tsk)
-        dir_strip_prod = os.path.join(dir_strip,'product')
+        dir_strip_prod = os.path.join(dirpath,'product')
         if not os.path.exists(dir_strip_prod):
             os.mkdir(dir_strip_prod)
-        tsk_strip = os.path.join(dstdir, '4_strip.bat')
-        with open(tsk_strip,'w') as f:
+        tsk = os.path.join(dstdir, '2_strip.bat')
+        with open(tsk,'w') as f:
             for strip in strips:
                 imglist = os.path.join(dir_strip_tsk,'{}.txt'.format(strip[0]))
                 with open(imglist, 'w') as l:
-                    for img in strip[4]:
-                        l.write('{}\n'.format(img))
-                fname = os.path.splitext(os.path.basename(strip[1][0]))[0]
-                lname = os.path.splitext(os.path.basename(strip[1][-1]))[0]
-                f.write('{} {} -o {}_SW.tif\n'.format(self._decode,imglist, os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)))
+                    for img in strip[1]:
+                        l.write('{}\n'.format(img[0]))
+                fname = os.path.splitext(os.path.basename(strip[1][0][0]))[0]
+                lname = os.path.splitext(os.path.basename(strip[1][-1][0]))[0]
+                dstpath = os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)+'.tif'
+                f.write('{} {} -o {}\n'.format(self._decode,imglist, dstpath))
+                strip.append(dstpath)
 
     def splicing(self, srclist, taskfile, dstdir, ext='.dat'):
         with open(taskfile,'w') as f:

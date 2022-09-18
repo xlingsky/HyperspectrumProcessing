@@ -1,6 +1,7 @@
 from pos import POS
 import os
 from shapely.geometry import Point, Polygon
+from osgeo import gdal
 
 def load(filepath):
     ret = list()
@@ -107,9 +108,25 @@ def loadStrips(filepath, minnum=50):
             num_img = int(info[1])
             lid+=1
             strip.append(sid)
-            strip.append([ls[lid+x].rstrip() for x in range(num_img)])
+            t = list()
+            for x in range(num_img):
+                tt = ls[lid+x].rstrip().split()
+                t.append([tt[0],int(tt[1]),int(tt[2])])
+            
+            strip.append(t)
             lid+=num_img
             if num_img < minnum:
                 continue
             ret.append(strip)
         return ret
+
+def saveStrips(filepath, strips):
+    with open(filepath, 'w') as f:
+        f.write('{}\n'.format(len(strips)))
+        for s in strips:
+            f.write('{} {}\n'.format(s[0],len(s[1])))
+            for img in s[1]:               
+                f.write('{} {} {}\n'.format(img[0],img[1],img[2]))
+            
+             
+            

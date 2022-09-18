@@ -82,7 +82,10 @@ bool Parse(const char* msg, HSP::Pos::record& rec){
 namespace HSP{
 
     typedef xlingsky::pchip D1Interp;
+
+#if BOOST_VERSION >= 107700
     typedef xlingsky::cubic_hermite D2Interp;
+#endif
 
 class Interpolator{
  public:
@@ -148,8 +151,13 @@ Interpolator* CreateInterpolator(std::map<int, Pos::record>& data){
   Interpolator* interp = new Interpolator;
   for(int i=0; i<3; ++i){
     xlingsky::InterpValueContainer t1 = t;
+
+#if BOOST_VERSION >= 107700
     if(vx_flag) interp->_x[i] = new D2Interp(std::move(t1), std::move(x[i]), std::move(vx[i]));
     else interp->_x[i] = new D1Interp(std::move(t1), std::move(x[i]));
+#else
+    interp->_x[i] = new D1Interp(std::move(t1), std::move(x[i]));
+#endif
     t1 = t;
     interp->_a[i] = new D1Interp(std::move(t1), std::move(a[i]));
   }
