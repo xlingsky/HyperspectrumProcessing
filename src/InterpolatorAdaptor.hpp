@@ -1,16 +1,13 @@
 #ifndef INTERPOLATOR_ADAPTOR_HPP
 #define INTERPOLATOR_ADAPTOR_HPP
 
-#include <boost/math/interpolators/pchip.hpp>
 #include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
 #include <boost/math/interpolators/cardinal_quintic_b_spline.hpp>
 #include <boost/math/interpolators/cardinal_quadratic_b_spline.hpp>
 #include <boost/math/interpolators/barycentric_rational.hpp>
 #include <boost/math/interpolators/makima.hpp>
-
-#if (BOOST_VERSION >= 107700)
 #include <boost/math/interpolators/cubic_hermite.hpp>
-#endif
+#include <boost/math/interpolators/pchip.hpp>
 
 namespace xlingsky {
 
@@ -57,10 +54,7 @@ INTERPOLATOR_SPLINE(cardinal_quintic_b_spline);
 INTERPOLATOR_SPLINE(cardinal_quadratic_b_spline);
 INTERPOLATOR_WITHOUT_DERIVATIVES(pchip);
 INTERPOLATOR_WITHOUT_DERIVATIVES(makima);
-
-#if (BOOST_VERSION >= 107700)
 INTERPOLATOR_WITH_DERIVATIVES(cubic_hermite);
-#endif
 
 BEGIN_INTERPOLATOR_DERIVED_CLASS(barycentric_rational, InterpolatorAdaptor::value_type)
 barycentric_rational(InterpValueContainer&& x, InterpValueContainer&& y, size_t order = 3) : Base(std::move(x), std::move(y), order) {}
