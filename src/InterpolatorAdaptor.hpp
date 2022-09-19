@@ -1,13 +1,16 @@
 #ifndef INTERPOLATOR_ADAPTOR_HPP
 #define INTERPOLATOR_ADAPTOR_HPP
 
-#include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
-#include <boost/math/interpolators/cardinal_quintic_b_spline.hpp>
 #include <boost/math/interpolators/cardinal_quadratic_b_spline.hpp>
 #include <boost/math/interpolators/barycentric_rational.hpp>
+
+#if BOOST_VERSION >= 107700
+#include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
+#include <boost/math/interpolators/cardinal_quintic_b_spline.hpp>
 #include <boost/math/interpolators/makima.hpp>
 #include <boost/math/interpolators/cubic_hermite.hpp>
 #include <boost/math/interpolators/pchip.hpp>
+#endif
 
 namespace xlingsky {
 
@@ -49,12 +52,15 @@ using Container = InterpValueContainer;\
   name(Container&& abscissas, Container&& ordinates, Container&& derivatives) : Base(std::move(abscissas),std::move(ordinates),std::move(derivatives)) {}\
 END_INTERPOLATOR_DERIVED_CLASS(name, InterpValueContainer)\
 
+INTERPOLATOR_SPLINE(cardinal_quadratic_b_spline);
+
+#if BOOST_VERSION >= 107700
 INTERPOLATOR_SPLINE(cardinal_cubic_b_spline);
 INTERPOLATOR_SPLINE(cardinal_quintic_b_spline);
-INTERPOLATOR_SPLINE(cardinal_quadratic_b_spline);
 INTERPOLATOR_WITHOUT_DERIVATIVES(pchip);
 INTERPOLATOR_WITHOUT_DERIVATIVES(makima);
 INTERPOLATOR_WITH_DERIVATIVES(cubic_hermite);
+#endif
 
 BEGIN_INTERPOLATOR_DERIVED_CLASS(barycentric_rational, InterpolatorAdaptor::value_type)
 barycentric_rational(InterpValueContainer&& x, InterpValueContainer&& y, size_t order = 3) : Base(std::move(x), std::move(y), order) {}

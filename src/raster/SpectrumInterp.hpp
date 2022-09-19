@@ -104,12 +104,10 @@ class Interpolator : public Operator {
         }
         xlingsky::InterpolatorAdaptor* interp = nullptr;
         switch (_type) {
+
+#if BOOST_VERSION >= 107700
           case BSPLINE_CUBIC:
             interp = new xlingsky::cardinal_cubic_b_spline(
-                y.data(), y.size(), x[0], x[1] - x[0]);
-            break;
-          case BSPLINE_QUADRATIC:
-            interp = new xlingsky::cardinal_quadratic_b_spline(
                 y.data(), y.size(), x[0], x[1] - x[0]);
             break;
           case BSPLINE_QUINTIC:
@@ -122,7 +120,13 @@ class Interpolator : public Operator {
           case MAKIMA:
             interp = new xlingsky::makima(std::move(x), std::move(y));
             break;
+#endif
+          case BSPLINE_QUADRATIC:
+            interp = new xlingsky::cardinal_quadratic_b_spline(
+                y.data(), y.size(), x[0], x[1] - x[0]);
+            break;
           case BARYCENTRIC:
+          default:
             interp =
                 new xlingsky::barycentric_rational(std::move(x), std::move(y));
             break;
