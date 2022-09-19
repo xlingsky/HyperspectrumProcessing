@@ -105,7 +105,7 @@ class Interpolator : public Operator {
         xlingsky::InterpolatorAdaptor* interp = nullptr;
         switch (_type) {
 
-#if BOOST_VERSION >= 107700
+#if 1
           case BSPLINE_CUBIC:
             interp = new xlingsky::cardinal_cubic_b_spline(
                 y.data(), y.size(), x[0], x[1] - x[0]);

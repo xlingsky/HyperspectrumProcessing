@@ -384,7 +384,7 @@ int main(int argc, char* argv[]){
               op->SetFilePath(apath, bpath, bppath, xmlpath);
               ops->Add(op);
             }
-            else if (name == "interp" && !outpath.empty()) {
+            else if (name == "interp") {
               std::vector<double> wl_old, wl_new;
               xlingsky::raster::spectrum::Interpolator::InterpType type;
               int num_lines = src->GetRasterXSize(), num_samples_old = src->GetRasterCount(), num_samples_new;

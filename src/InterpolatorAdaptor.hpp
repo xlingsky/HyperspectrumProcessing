@@ -5,7 +5,7 @@
 #include <boost/math/interpolators/barycentric_rational.hpp>
 #include <boost/version.hpp>
 
-#if BOOST_VERSION >= 107700
+#if 1
 #include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
 #include <boost/math/interpolators/cardinal_quintic_b_spline.hpp>
 #include <boost/math/interpolators/makima.hpp>
@@ -58,7 +58,7 @@ END_INTERPOLATOR_DERIVED_CLASS(name, InterpValueContainer)\
 
 INTERPOLATOR_SPLINE(cardinal_quadratic_b_spline);
 
-#if BOOST_VERSION >= 107700
+#if 1
 INTERPOLATOR_SPLINE(cardinal_cubic_b_spline);
 INTERPOLATOR_SPLINE(cardinal_quintic_b_spline);
 INTERPOLATOR_WITHOUT_DERIVATIVES(pchip);

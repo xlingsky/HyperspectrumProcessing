@@ -119,27 +119,13 @@ class decodeRunner:
                     pos = os.path.splitext(p)[0]+'.pos'
                     name = strip[0]+'_'+os.path.basename(pos)
                     f.write('cp {} {}\n'.format(pos, os.path.join(dirpath, name)))
-        dirpath = os.path.join(dstdir, '2_strip')
-        if not os.path.exists(dirpath):
-            os.mkdir(dirpath)
-        dir_strip_tsk = os.path.join(dirpath, 'tsk')
-        if not os.path.exists(dir_strip_tsk):
-            os.mkdir(dir_strip_tsk)
-        dir_strip_prod = os.path.join(dirpath,'product')
-        if not os.path.exists(dir_strip_prod):
-            os.mkdir(dir_strip_prod)
-        tsk = os.path.join(dstdir, '2_strip.bat')
-        with open(tsk,'w') as f:
+        dirpath = r'P:\ws\data'
+        with open(os.path.join(dstdir,'2_radio.bat'), 'w') as f:
             for strip in strips:
-                imglist = os.path.join(dir_strip_tsk,'{}.txt'.format(strip[0]))
-                with open(imglist, 'w') as l:
-                    for img in strip[1]:
-                        l.write('{}\n'.format(img[0]))
-                fname = os.path.splitext(os.path.basename(strip[1][0][0]))[0]
-                lname = os.path.splitext(os.path.basename(strip[1][-1][0]))[0]
-                dstpath = os.path.join(dir_strip_prod, strip[0]+'_'+fname+'_'+lname)+'.tif'
-                f.write('{} {} -o {}\n'.format(self._decode,imglist, dstpath))
-                strip.append(dstpath)
+                for img in strip[2]:
+                    dstpath = os.path.join(dirpath,os.path.splitext(os.path.basename(img))[0]+'.dat')
+                    f.write('{} -task {} {} -o {}\n'.format(self._decode, r'D:\jinchang\config\swir\task.xml', img, dstpath))
+        
 
     def splicing(self, srclist, taskfile, dstdir, ext='.dat'):
         with open(taskfile,'w') as f:
