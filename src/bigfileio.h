@@ -22,7 +22,9 @@ typedef 	unsigned short	WORD		;
 typedef 	unsigned int	DWORD		;
 typedef 	unsigned int	UINT		;
 
+#ifndef __USE_LARGEFILE64
 #define __USE_LARGEFILE64
+#endif
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>

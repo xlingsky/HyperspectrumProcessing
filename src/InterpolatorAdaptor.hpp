@@ -3,6 +3,7 @@
 
 #include <boost/math/interpolators/cardinal_quadratic_b_spline.hpp>
 #include <boost/math/interpolators/barycentric_rational.hpp>
+#include <boost/version.hpp>
 
 #if BOOST_VERSION >= 107700
 #include <boost/math/interpolators/cardinal_cubic_b_spline.hpp>
@@ -10,6 +11,9 @@
 #include <boost/math/interpolators/makima.hpp>
 #include <boost/math/interpolators/cubic_hermite.hpp>
 #include <boost/math/interpolators/pchip.hpp>
+#define BOOST_INTERPOLATOR_CLASS(name) boost::math::interpolators::name
+#else
+#define BOOST_INTERPOLATOR_CLASS(name) boost::math::name
 #endif
 
 namespace xlingsky {
@@ -24,7 +28,7 @@ class InterpolatorAdaptor {
 };
 
 #define BEGIN_INTERPOLATOR_DERIVED_CLASS(name, datatype) \
-class name : public InterpolatorAdaptor, public boost::math::interpolators::name<datatype> {\
+class name : public InterpolatorAdaptor, public BOOST_INTERPOLATOR_CLASS(name)<datatype> {\
 public:\
   using Real = InterpolatorAdaptor::value_type;\
   using Base = boost::math::interpolators::name<datatype>;\
