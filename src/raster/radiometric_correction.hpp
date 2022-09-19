@@ -266,6 +266,10 @@ class BadPixelCorrection : public FrameIterator {
     const int tilesize = rows;
     manager.AppendDimension(cols, tilesize, margin, margin);
     manager.AppendDimension(rows, tilesize, margin, margin);
+
+#ifdef _USE_OPENMP
+#pragma omp parallel for
+#endif
     for (int r = 0; r < manager.Size(1); ++r) {
       auto segr = manager.Segment(1, r);
       int h = (r+1==manager.Size(1)?segr.second:tilesize);
@@ -273,7 +277,7 @@ class BadPixelCorrection : public FrameIterator {
         auto segc = manager.Segment(0, c);
         int w = (c+1==manager.Size(0)?segc.second:tilesize);
         cv::Rect rc0(segc.first, segr.first, w, h),
-            rc1(segc.first, segr.first, segc.second, segc.second), rc2(0,0,w,h);
+            rc1(segc.first, segr.first, segc.second, segr.second), rc2(0,0,w,h);
         op(rc1, rc2, rc0);
       }
     }
