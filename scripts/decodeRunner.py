@@ -60,11 +60,11 @@ class decodeRunner:
             os.mkdir(dirpath)
         with open(os.path.join(dstdir,'x_poscopy.bat'), 'w') as f:
             for strip in strips:
-                for img in strip[1]:
+                for i,img in enumerate(strip[1]):
                     p = img[0]
                     pos = os.path.splitext(p)[0]+'.pos'
-                    name = strip[0]+'_'+os.path.basename(pos)
-                    f.write('cp {} {}\n'.format(pos, os.path.join(dirpath, name)))
+                    dstpath = os.path.join(dirpath,os.path.splitext(os.path.basename(strip[2][i]))[0]+'.pos')
+                    f.write('cp {} {}\n'.format(pos, dstpath))
         dirpath = os.path.join(dstdir, '2_strip')
         if not os.path.exists(dirpath):
             os.mkdir(dirpath)
@@ -114,11 +114,11 @@ class decodeRunner:
             os.mkdir(dirpath)
         with open(os.path.join(dstdir,'x_poscopy.bat'), 'w') as f:
             for strip in strips:
-                for img in strip[1]:
+                for i,img in enumerate(strip[1]):
                     p = img[0]
                     pos = os.path.splitext(p)[0]+'.pos'
-                    name = strip[0]+'_'+os.path.basename(pos)
-                    f.write('cp {} {}\n'.format(pos, os.path.join(dirpath, name)))
+                    dstpath = os.path.join(dirpath,os.path.splitext(os.path.basename(strip[2][i]))[0]+'.pos')
+                    f.write('cp {} {}\n'.format(pos, dstpath))
         dirpath = r'P:\ws\data'
         with open(os.path.join(dstdir,'2_radio.bat'), 'w') as f:
             for strip in strips:
