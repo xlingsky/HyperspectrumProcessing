@@ -537,52 +537,57 @@ class NucCalculator : public FrameIterator{
     for(int t=0; t<manager.Size(0); ++t){
       auto seg = manager.Segment(0, t);
       auto& sum = tile_sum[t];
+      double v_lower[2] = {0,0}, v_upper[2] = {0,0};
+      int cnt_lower[2]={0,0}, cnt_upper[2]={0,0};
       for(int r=seg.first; r<seg.first+seg.second; ++r){
-        sum.stat += bws[r].stat;
-        if(bws[r].stat) continue;
-        sum.v_lower += bws[r].v_lower;
-        sum.v_upper += bws[r].v_upper;
-        sum.cnt_lower += bws[r].cnt_lower;
-        sum.cnt_upper += bws[r].cnt_upper;
+        switch(bws[r].stat){
+          case 0:{
+            v_lower[0] += bws[r].v_lower;
+            v_upper[0] += bws[r].v_upper;
+            cnt_lower[0] += bws[r].cnt_lower;
+            cnt_upper[0] += bws[r].cnt_upper;
+          }break;
+          case 1:{
+            v_lower[1] += bws[r].v_lower+bws[r].v_upper;
+            cnt_lower[1] += bws[r].cnt_lower+bws[r].cnt_upper;
+          }break;
+          default:
+            break;
+        }
       }
-      if(sum.stat < seg.second){
+      if(cnt_upper[0]>0){
         valid_tile_id.push_back(t);
-        sum.v_lower /= sum.cnt_lower;
-        sum.v_upper /= sum.cnt_upper;
+        sum.stat = 0;
+        sum.cnt_lower = cnt_lower[0];
+        sum.cnt_upper = cnt_upper[0];
+        sum.v_lower = v_lower[0]/cnt_lower[0];
+        sum.v_upper = v_upper[0]/cnt_upper[0];
+      }else if(cnt_lower[1]>0){
+        sum.stat = 1;
+        sum.cnt_lower = cnt_lower[1];
+        sum.v_lower = v_lower[1]/cnt_lower[1];
+      }else{
+        sum.stat = 2;
       }
     }
     if(valid_tile_id.size()==0){
-      for(){
-      }
-    }
-
-    std::vector<double> dn_high(rows), dn_low(rows);
-
-    for(int t=0; t<manager.Size(0); ++t){
-      auto seg = manager.Segment(0, t);
-      int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
-      auto& sum = tile_sum[t];
-      if (sum.cnt_lower<1 || sum.cnt_upper<1) {
-        if (sum.stat == seg.second) {
-          sum.v_upper = 0;
-          sum.cnt_upper = 0;
-          for (int r = seg.first; r < seg.first + seg.second; ++r) {
-            sum.v_upper += bws[r].v_upper+bws[r].v_lower;
-            sum.cnt_upper += bws[r].cnt_upper+bws[r].cnt_lower;
-          }
-          sum.v_upper /= sum.cnt_upper;
+      for (int t = 0; t < manager.Size(0); ++t) {
+        auto seg = manager.Segment(0, t);
+        auto &sum = tile_sum[t];
+        int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
+        if(sum.stat==1){
           for (int r = seg.first; r < seg.first + tilesize; ++r) {
-            sum.v_lower = bws[r].v_lower+bws[r].v_upper;
-            sum.cnt_lower = bws[r].cnt_lower+bws[r].cnt_upper;
-            sum.v_lower /= sum.cnt_lower;
+            double v = bws[r].v_lower+bws[r].v_upper;
+            int cnt = bws[r].cnt_lower+bws[r].cnt_upper;
+            v /= cnt;
             switch(_mode){
               case OFFSET:{
                 _a.push_back(1);
-                _b.push_back(sum.v_upper-sum.v_lower);
+                _b.push_back(v-sum.v_lower);
                 _badpixels.push_back(0);
               }break;
               default:{
-                _a.push_back(sum.v_upper/sum.v_lower);
+                _a.push_back(v/sum.v_lower);
                 _b.push_back(0);
                 _badpixels.push_back(0);
               };
@@ -594,6 +599,26 @@ class NucCalculator : public FrameIterator{
             _b.push_back(0);
             _badpixels.push_back(1);
           }
+        }
+      }
+    }
+
+    std::vector<double> dn_high(rows), dn_low(rows);
+
+    for(int t=0; t<manager.Size(0); ++t){
+      auto seg = manager.Segment(0, t);
+      auto& sum = tile_sum[t];
+      if (sum.cnt_lower<1 || sum.cnt_upper<1) {
+        if (sum.stat == seg.second) {
+          sum.v_upper = 0;
+          sum.cnt_upper = 0;
+          for (int r = seg.first; r < seg.first + seg.second; ++r) {
+            sum.v_upper += bws[r].v_upper+bws[r].v_lower;
+            sum.cnt_upper += bws[r].cnt_upper+bws[r].cnt_lower;
+          }
+          sum.v_upper /= sum.cnt_upper;
+          
+        }else{
         }
         continue;
       }
