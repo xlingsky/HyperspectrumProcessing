@@ -417,7 +417,7 @@ class NucCalculator : public FrameIterator{
   char _bp_path[512];
   char _xml_path[512];
  public:
-  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 5, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
+  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 0, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
     _a_path[0] = _b_path[0] = _bp_path[0] = _xml_path[0] = 0;
   }
   ~NucCalculator() {
@@ -601,6 +601,7 @@ class NucCalculator : public FrameIterator{
           }
         }
       }
+      return true;
     }
 
     std::vector<double> dn_high(rows), dn_low(rows);

@@ -350,7 +350,7 @@ int main(int argc, char* argv[]){
               float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.03);
               float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.03);
               int tile_size = v.second.get<int>("tile_size", (std::numeric_limits<int>::max)());
-              int tile_overlap = v.second.get<int>("tile_overlap", 5);
+              int tile_overlap = v.second.get<int>("tile_overlap", 0);
               bool preferred_a = v.second.get<bool>("a", true);
               xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
               if(nodata_success) op->SetNoDataValue(nodata);
