@@ -533,6 +533,7 @@ class NucCalculator : public FrameIterator{
     manager.AppendDimension(rows, _line_tile_size, _line_tile_overlap, _line_tile_overlap);
 
     std::vector<BW> tile_sum(manager.Size(0));
+    std::vector<int> valid_tile_id;
     for(int t=0; t<manager.Size(0); ++t){
       auto seg = manager.Segment(0, t);
       auto& sum = tile_sum[t];
@@ -544,9 +545,16 @@ class NucCalculator : public FrameIterator{
         sum.cnt_lower += bws[r].cnt_lower;
         sum.cnt_upper += bws[r].cnt_upper;
       }
+      if(sum.stat < seg.second){
+        valid_tile_id.push_back(t);
+        sum.v_lower /= sum.cnt_lower;
+        sum.v_upper /= sum.cnt_upper;
+      }
     }
-    // for(int t=0; t<tile_sum.size(); ++t){
-    // }
+    if(valid_tile_id.size()==0){
+      for(){
+      }
+    }
 
     std::vector<double> dn_high(rows), dn_low(rows);
 
