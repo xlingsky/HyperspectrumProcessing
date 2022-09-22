@@ -533,7 +533,7 @@ class NucCalculator : public FrameIterator{
     manager.AppendDimension(rows, _line_tile_size, _line_tile_overlap, _line_tile_overlap);
 
     std::vector<BW> tile_sum(manager.Size(0));
-    std::vector<int> valid_tile_id;
+    std::vector< std::pair<int, float> > valid_tiles;
     for(int t=0; t<manager.Size(0); ++t){
       auto seg = manager.Segment(0, t);
       auto& sum = tile_sum[t];
@@ -556,7 +556,7 @@ class NucCalculator : public FrameIterator{
         }
       }
       if(cnt_upper[0]>0){
-        valid_tile_id.push_back(t);
+        valid_tiles.emplace_back(t, seg.first+(double)seg.second/2.0);
         sum.stat = 0;
         sum.cnt_lower = cnt_lower[0];
         sum.cnt_upper = cnt_upper[0];
@@ -570,7 +570,7 @@ class NucCalculator : public FrameIterator{
         sum.stat = 2;
       }
     }
-    if(valid_tile_id.size()==0){
+    if(valid_tiles.size()==0){
       for (int t = 0; t < manager.Size(0); ++t) {
         auto seg = manager.Segment(0, t);
         auto &sum = tile_sum[t];
@@ -602,6 +602,16 @@ class NucCalculator : public FrameIterator{
         }
       }
       return true;
+    }
+    for (int t = 0; t < tile_sum.size(); ++t) {
+      auto& sum = tile_sum[t];
+      if (sum.stat == 1) {
+        auto seg = manager.Segment(0, t);
+        std::vector<double> w(valid_tiles.size());
+        for (int i = 0; i < valid_tiles.size(); ++i) {
+          auto segv = manager.Segment(0, valid_tile_id[i]);
+        }
+      }
     }
 
     std::vector<double> dn_high(rows), dn_low(rows);
