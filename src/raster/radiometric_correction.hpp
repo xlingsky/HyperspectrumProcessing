@@ -603,18 +603,50 @@ class NucCalculator : public FrameIterator{
       }
       return true;
     }
-    for (int t = 0; t < tile_sum.size(); ++t) {
-      auto& sum = tile_sum[t];
-      if (sum.stat == 1) {
-        auto seg = manager.Segment(0, t);
-        std::vector<double> w(valid_tiles.size());
-        for (int i = 0; i < valid_tiles.size(); ++i) {
-          auto segv = manager.Segment(0, valid_tile_id[i]);
+    {
+      const double sigma = (double)rows*rows/2;
+      for (int t = 0; t < tile_sum.size(); ++t) {
+        auto& sum = tile_sum[t];
+        if (sum.stat == 1) {
+          auto seg = manager.Segment(0, t);
+          double x = seg.first + (double)seg.second / 2;
+          double w = 0, hi = 0, lo = 0;
+          for (int i = 0; i < valid_tiles.size(); ++i) {
+            double wt = exp(-pow(2.0,x-valid_tiles[i].second)/sigma);
+            w += wt;
+            hi += wt*tile_sum[valid_tiles[i].first].v_upper;
+            lo += wt*tile_sum[valid_tiles[i].first].v_lower;
+          }
+          hi /= w;
+          lo /= w;
+          if (sum.v_lower < (hi + lo) / 2) {
+            sum.v_upper = hi;
+          } else {
+            sum.v_upper = sum.v_lower;
+            sum.v_lower = lo;
+          }
+          sum.cnt_lower = 1;
+          sum.cnt_upper = 1;
         }
       }
     }
 
     std::vector<double> dn_high(rows), dn_low(rows);
+    for (int t = 0; t < manager.Size(0); ++t) {
+      auto& sum = tile_sum[t];
+      auto seg = manager.Segment(0, t);
+      int tilesize = (t + 1 == manager.Size(0) ? seg.second : _line_tile_size);
+      if (sum.stat < 2) {
+        for (int r = seg.first; r < seg.first + seg.second; ++r) {
+        }
+      } else {
+          for (int r = 0; r < tilesize; ++r) {
+            _a.push_back(1);
+            _b.push_back(0);
+            _badpixels.push_back(1);
+          }
+      }
+    }
 
     for(int t=0; t<manager.Size(0); ++t){
       auto seg = manager.Segment(0, t);
