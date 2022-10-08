@@ -26,7 +26,7 @@ DEFINE_string(task,"", "file for tasklist");
 DEFINE_int32(t,0x00C01509, "header tag");//0x0915C000
 DEFINE_int32(w, -1, "input image width");
 DEFINE_int32(b, -1, "input image bands");
-DEFINE_int32(buffer, (100*1024*1024), "buffer size");
+DEFINE_int32(buffer, 2048, "buffer size/MB");//(std::numeric_limits<int>::max)()
 DEFINE_int32(splice, 1, "unite images into one");
 DEFINE_string(ext, ".tif", "default extension for output decoded image");
 DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
@@ -283,7 +283,7 @@ int main(int argc, char* argv[]){
             if (name == "uniform") {
                 std::string a = v.second.get<std::string>("a");
                 std::string b = v.second.get<std::string>("b");
-                xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(buffer_size[store_prior[0]],buffer_size[store_prior[1]]);
                 if (!op->load(adaptor.absolutepath(a).string().c_str(), adaptor.absolutepath(b).string().c_str())) {
                     std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
                     return 1;
@@ -294,7 +294,7 @@ int main(int argc, char* argv[]){
             }
             else if (name == "badpixel") {
                 std::string b = v.second.get<std::string>("file");
-                xlingsky::raster::radiometric::BadPixelCorrection* op = new xlingsky::raster::radiometric::BadPixelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
+                xlingsky::raster::radiometric::BadPixelCorrection* op = new xlingsky::raster::radiometric::BadPixelCorrection(buffer_size[store_prior[0]],buffer_size[store_prior[1]]);
                 if (!op->load( adaptor.absolutepath(b).string().c_str())) {
                     std::cout << "ERROR:badpixel file not loaded a and b" << std::endl;
                     return 1;
@@ -316,11 +316,24 @@ int main(int argc, char* argv[]){
                 boutput = 1;
             }else if(name == "dark"){
               std::string b = v.second.get<std::string>("b");
-              xlingsky::raster::radiometric::DarkLevelCorrection* op = new xlingsky::raster::radiometric::DarkLevelCorrection(src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount());
-              if (!op->load(adaptor.absolutepath(b).string().c_str())) {
-                std::cout << "ERROR:dark file not loaded b" << std::endl;
-                return 1;
-              }
+              std::string a = v.second.get<std::string>("a","");
+              std::string index = v.second.get<std::string>("index","");
+              xlingsky::raster::radiometric::PixelCorrection* op = nullptr;
+                if(a.empty() || index.empty()){
+                    xlingsky::raster::radiometric::DarkBackgroundCorrection* p = new xlingsky::raster::radiometric::DarkBackgroundCorrection(buffer_size[store_prior[0]],buffer_size[store_prior[1]]);
+                    if (!p->load(adaptor.absolutepath(b).string().c_str())) {
+                        std::cout << "ERROR:dark file not loaded b" << std::endl;
+                        return 1;
+                    }
+                    op = p;
+                }else{
+                    xlingsky::raster::radiometric::DarkBackgroundLinear* p = new xlingsky::raster::radiometric::DarkBackgroundLinear(buffer_size[store_prior[0]],buffer_size[store_prior[1]],buffer_size[store_prior[2]]);
+                    if (!p->load(adaptor.absolutepath(a).string().c_str(),adaptor.absolutepath(b).string().c_str(),adaptor.absolutepath(index).string().c_str())) {
+                        std::cout << "ERROR:linear dark file not loaded a,b,index" << std::endl;
+                        return 1;
+                    }
+                    op = p;
+                }
               if(nodata_success) op->SetNoDataValue(nodata);
               ops->Add(op);
 			  boutput = 1;
@@ -344,17 +357,21 @@ int main(int argc, char* argv[]){
               if(nodata_success) op->SetNoDataValue(nodata);
               ops->Add(op);
             }
-            else if (name == "unc"){
-              float cut_ratio_lower = v.second.get<float>("cut_lower", 0.03);
-              float cut_ratio_upper = v.second.get<float>("cut_upper", 0.1);
-              float ratio_threshold_lower = v.second.get<float>("threshold_lower", 0.03);
-              float ratio_threshold_upper = v.second.get<float>("threshold_upper", 0.03);
+            else if (name == "nuc"){
+              float cut_ratio_dark = v.second.get<float>("cut_dark", 0.03);
+              float cut_ratio_bright = v.second.get<float>("cut_bright", 0.03);
+              float ratio_threshold_dark = v.second.get<float>("threshold_dark", 0.03);
+              float ratio_threshold_bright = v.second.get<float>("threshold_bright", 0.03);
+              int sample_num_dark = v.second.get<int>("sample_dark", 40);
+              int sample_num_bright = v.second.get<int>("sample_bright", 40);
               int tile_size = v.second.get<int>("tile_size", (std::numeric_limits<int>::max)());
-              int tile_overlap = v.second.get<int>("tile_overlap", 0);
+              int tile_overlap = v.second.get<int>("tile_overlap", -1);
               bool preferred_a = v.second.get<bool>("a", true);
-              xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper, ratio_threshold_lower, ratio_threshold_upper, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
+              bool debug = v.second.get<bool>("debug", true);
+                if(tile_overlap<0) tile_overlap = tile_size/2;
+                xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_dark, cut_ratio_bright, ratio_threshold_dark, ratio_threshold_bright, sample_num_dark, sample_num_bright, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
               if(nodata_success) op->SetNoDataValue(nodata);
-              char apath[512], bpath[512], bppath[512], xmlpath[512];
+              char apath[512], bpath[512], bppath[512], xmlpath[512], hipath[512], lopath[512];
               boost::filesystem::path dstpath;
               if(FLAGS_o.empty()){
                 dstpath = path;
@@ -380,8 +397,18 @@ int main(int argc, char* argv[]){
                 t = dstpath;
                 t += "uniform.xml";
                 strcpy(xmlpath, t.string().c_str());
+                if (debug){
+                  t = dstpath;
+                  t += "hi.txt";
+                  strcpy(hipath, t.string().c_str());
+                  t = dstpath;
+                  t += "lo.txt";
+                  strcpy(lopath, t.string().c_str());
+                }else{
+                  hipath[0] = lopath[0] = 0;
+                }
               }
-              op->SetFilePath(apath, bpath, bppath, xmlpath);
+              op->SetFilePath(apath, bpath, bppath, xmlpath, hipath, lopath);
               ops->Add(op);
             }
             else if (name == "interp") {
@@ -435,19 +462,27 @@ int main(int argc, char* argv[]){
               boutput = 1;
             }
         }
-		if (boutput) {
-			if (!FLAGS_o.empty()) outpath = FLAGS_o;
-			else {
-				outpath = path;
-				outpath.replace_extension();
-				outpath += "_mod";
-				outpath += path.extension();
-			}
-		}
+
+        VLOG(1) << "Total number of tasks is " << ops->size();
+        if(ops->size()<1){
+          delete ops;
+          GDALClose(src);
+          return 1;
+        }
+
+        if (boutput) {
+          if (!FLAGS_o.empty()) outpath = FLAGS_o;
+          else {
+            outpath = path;
+            outpath.replace_extension();
+            outpath += "_mod";
+            outpath += path.extension();
+          }
+        }
         if (!outpath.empty()) {
-                  dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows,
-                                   dst_bands,
-                                   src->GetRasterBand(1)->GetRasterDataType());
+          dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows,
+                           dst_bands,
+                           src->GetRasterBand(1)->GetRasterDataType());
           if (dst == nullptr) {
             GDALClose(src);
             return 1;
@@ -459,16 +494,14 @@ int main(int argc, char* argv[]){
         if (dst) frame.SetDestination(dst);
         if (buffer_size[2] < dst_bands) buffer_size[2] = dst_bands;
         {
-            size_t max_buffer_size = (size_t)1024 * 1024 * 1024;
-            int l = max_buffer_size / (frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
+            size_t max_buffer_size = (size_t)FLAGS_buffer<<20;
+            size_t l = max_buffer_size / ((size_t)frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
             if (l == 0) l = 1;
             if (buffer_size[store_prior[2]]>l)
                 buffer_size[store_prior[2]] = l;
         }
 		frame.ReserveBufferSize((size_t)buffer_size[0] * buffer_size[1] * buffer_size[2]);
         if (src->GetRasterCount() < buffer_size[2])  buffer_size[2] = src->GetRasterCount();
-
-        VLOG(1) << "Total number of tasks is " << ops->size();
 
         xlingsky::ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
 

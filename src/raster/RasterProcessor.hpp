@@ -42,6 +42,7 @@ struct Patch {
 class Processor {
  public:
   using DimSeg = xlingsky::TileManager::Seg;
+  using IndexType = xlingsky::TileManager::IndexType;
 
  protected:
   Patch _src;
@@ -104,8 +105,8 @@ class Processor {
             _seg[0].second, _seg[1].second, &_buffer[0], _seg[0].second,
             _seg[1].second, _datatype, _seg[2].second, &_bandlist[0],
             store_space[0], store_space[1], store_space[2]) == CE_None) {
-      int store_size[3] = {_seg[0].second, _seg[1].second, _seg[2].second};
-      int imoff[3] = {_src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first, _src.win[2]+_seg[2].first};
+      IndexType store_size[3] = {_seg[0].second, _seg[1].second, _seg[2].second};
+      IndexType imoff[3] = {_src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first, _src.win[2]+_seg[2].first};
 #ifdef _LOGGING
       VLOG(_LOG_LEVEL_RASTERPROCESSOR) << "Operators starting...";
 #endif

@@ -10,6 +10,7 @@
 #include "RasterOperator.h"
 #include "inpaint.hpp"
 #include "TileManager.hpp"
+#include "InterpolatorAdaptor.hpp"
 
 //#define DEBUG
 
@@ -138,12 +139,18 @@ class PixelCorrection : public FrameIterator {
   int _cols;
   int _rows;
   int _threshold;
+#ifdef BADPIXEL_COUNTING
   std::vector<std::vector<int> > _list;
+#endif
 
  public:
-  PixelCorrection(int cols, int rows, int bands)
-      : _cols(cols), _rows(bands), _list(rows), _threshold(10) {}
-  virtual DataType correct(DataType, int) = 0;
+  PixelCorrection(int cols, int rows)
+      : _cols(cols), _rows(rows),
+#ifdef BADPIXEL_COUNTING
+    _list(rows),
+#endif
+    _threshold(10) {}
+  virtual DataType correct(int, DataType, int) = 0;
 
   bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
@@ -164,7 +171,7 @@ class PixelCorrection : public FrameIterator {
       for(int c=0; c<cols; ++c){
         size_t i = i1+c;
         if(IsNoData(pdata[i])) continue;
-        DataType d = correct(pdata[i], i0+c);
+        DataType d = correct(b, pdata[i], i0+c);
         if (d < 0) {
           pdata[i] = 0;
 #ifdef BADPIXEL_COUNTING
@@ -178,16 +185,19 @@ class PixelCorrection : public FrameIterator {
   }
   int cols() const { return _cols; }
   int rows() const { return _rows; }
+    
+#ifdef BADPIXEL_COUNTING
   int max_bad_pixel_num() const {
     int cnt = 0;
     for (auto it = _list.begin(); it != _list.end(); ++it)
       if (cnt < it->size()) cnt = it->size();
     return cnt;
   }
+#endif
 };
 
 // dv is a bandsXcols  dark level composation value matrix stored in row-major
-class DarkLevelCorrection : public PixelCorrection {
+class DarkBackgroundCorrection : public PixelCorrection {
  public:
   typedef PixelCorrection::DataType DataType;
 
@@ -195,16 +205,60 @@ class DarkLevelCorrection : public PixelCorrection {
   DataType* _data;
 
  public:
-  DarkLevelCorrection(int cols, int rows, int bands)
-      : _data(new DataType[(size_t)cols * bands]),
-        PixelCorrection(cols, rows, bands) {}
-  ~DarkLevelCorrection() {
+  DarkBackgroundCorrection(int cols, int rows)
+      : _data(new DataType[(size_t)cols * rows]),
+        PixelCorrection(cols, rows) {}
+  ~DarkBackgroundCorrection() {
     if (_data) delete[] _data;
   }
   bool load(const char* filepath) {
     return ::xlingsky::raster::radiometric::load(filepath, (size_t)cols() * rows(), _data);
   }
-  DataType correct(DataType d, int i) override { return d - _data[i]; }
+  DataType correct(int, DataType d, int i) override { return d - _data[i]; }
+};
+
+class DarkBackgroundLinear : public PixelCorrection{
+public:
+  typedef PixelCorrection::DataType DataType;
+protected:
+    DataType* _a;
+    DataType* _b;
+    size_t* _index;
+    int _bands;
+public:
+    DarkBackgroundLinear(int cols, int rows, int bands) : PixelCorrection(cols, rows), _bands(bands){
+        size_t sz = (size_t)cols * rows;
+        _a = new DataType[sz];
+        _b = new DataType[sz];
+        _index = new size_t[bands];
+    }
+    ~DarkBackgroundLinear(){
+        if(_a) delete[] _a;
+        if(_b) delete[] _b;
+        if(_index) delete[] _index;
+    }
+    bool load(const char* a, const char* b, const char* index){
+        if (::xlingsky::raster::radiometric::load(a, (size_t)cols() * rows(), _a) &&
+            ::xlingsky::raster::radiometric::load(b, (size_t)cols() * rows(), _b)){
+            FILE* fp = fopen(index, "r");
+            if(fp){
+                size_t cnt = 0;
+                char strline[512];
+                while(fgets(strline, 512, fp) && cnt<_bands){
+                    size_t d;
+                    if(sscanf(strline, "%ld",&d)==1){
+                        _index[cnt++] = d;
+                    }
+                }
+                fclose(fp);
+                return cnt==_bands;
+            }
+        }
+        return false;
+    }
+  DataType correct(int b, DataType d, int i) override {
+      return d-(_a[i] * _index[b] + _b[i]);
+  }
 };
 
 class NonUniformCorrection : public PixelCorrection {
@@ -216,9 +270,9 @@ class NonUniformCorrection : public PixelCorrection {
   DataType* _b;
 
  public:
-  NonUniformCorrection(int cols, int rows, int bands)
-      : PixelCorrection(cols, rows, bands) {
-    size_t sz = (size_t)cols * bands;
+  NonUniformCorrection(int cols, int rows)
+      : PixelCorrection(cols, rows) {
+    size_t sz = (size_t)cols * rows;
     _a = new DataType[sz];
     _b = new DataType[sz];
   }
@@ -232,7 +286,7 @@ class NonUniformCorrection : public PixelCorrection {
       return true;
     return false;
   }
-  DataType correct(DataType d, int i) override { return _a[i] * d + _b[i]; }
+  DataType correct(int, DataType d, int i) override { return _a[i] * d + _b[i]; }
 };
 
 class BadPixelCorrection : public FrameIterator {
@@ -241,8 +295,8 @@ class BadPixelCorrection : public FrameIterator {
 
  public:
   typedef float DataType;
-  BadPixelCorrection(int cols, int, int bands)
-      : _mask(cv::Mat::zeros(bands, cols, CV_8U)) {}
+  BadPixelCorrection(int cols, int rows)
+      : _mask(cv::Mat::zeros(rows, cols, CV_8U)) {}
   bool load(const char* filepath) {
     FILE* fp = fopen(filepath, "r");
     if (fp == nullptr) return false;
@@ -394,21 +448,29 @@ class NucCalculator : public FrameIterator{
     SCALE,
     OFFSET
   };
+  enum InterpType{
+    BSPLINE_CUBIC,
+    BSPLINE_QUINTIC,
+    BSPLINE_QUADRATIC,
+    BARYCENTRIC
+  };
  private:
-  float _cut_ratio_upper;
-  float _cut_ratio_lower;
-  int _sample_maxnum_upper;
-  int _sample_maxnum_lower;
-  int _sample_minnum_upper;
-  int _sample_minnum_lower;
+  float _cut_ratio_bright;
+  float _cut_ratio_dark;
+  int _sample_maxnum_bright;
+  int _sample_maxnum_dark;
+  int _sample_minnum_bright;
+  int _sample_minnum_dark;
   int _line_tile_size;
   int _line_tile_overlap;
-  float _value_ratio_threshold_upper;
-  float _value_ratio_threshold_lower;
+  float _value_ratio_threshold_bright;
+  float _value_ratio_threshold_dark;
   int _mode;
 
   std::vector<double> _a;
   std::vector<double> _b;
+  std::vector<double> _hi;
+  std::vector<double> _lo;
   std::vector<int> _badpixels;
   int _width;
 
@@ -416,9 +478,12 @@ class NucCalculator : public FrameIterator{
   char _b_path[512];
   char _bp_path[512];
   char _xml_path[512];
+  char _hi_path[512];
+  char _lo_path[512];
  public:
-  NucCalculator(int w, float cut_ratio_lower = 0.03, float cut_ratio_upper = 0.1, float ratio_threshold_lower = 0.03, float ratio_threshold_upper = 0.03, int line_tile_size = 30, int line_tile_overlap = 0, int mode = SCALE) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper), _sample_maxnum_lower(40), _sample_maxnum_upper(40), _sample_minnum_lower(3), _sample_minnum_upper(3), _value_ratio_threshold_lower(ratio_threshold_lower), _value_ratio_threshold_upper(ratio_threshold_upper), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
+  NucCalculator(int w, float cut_ratio_dark = 0.03, float cut_ratio_bright = 0.1, float ratio_threshold_dark = 0.03, float ratio_threshold_bright = 0.03, int sample_num_dark = 40, int sample_num_bright = 40, int line_tile_size = 30, int line_tile_overlap = 15, int mode = SCALE) : _width(w), _cut_ratio_dark(cut_ratio_dark), _cut_ratio_bright(cut_ratio_bright), _sample_maxnum_dark(sample_num_dark), _sample_maxnum_bright(sample_num_bright), _sample_minnum_dark(3), _sample_minnum_bright(3), _value_ratio_threshold_dark(ratio_threshold_dark), _value_ratio_threshold_bright(ratio_threshold_bright), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
     _a_path[0] = _b_path[0] = _bp_path[0] = _xml_path[0] = 0;
+    _hi_path[0] = _lo_path[0] = 0;
   }
   ~NucCalculator() {
     if(_a_path[0]) {
@@ -451,28 +516,40 @@ class NucCalculator : public FrameIterator{
         fprintf(fp, "</HSP>\n");
         fclose(fp);
 #ifdef _LOGGING
-        VLOG(_LOG_LEVEL_RADIOMETRIC) << "UNC xml was saved to " << _xml_path;
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "NUC xml was saved to " << _xml_path;
+#endif
+      }
+      if(_hi_path[0] && ::xlingsky::raster::radiometric::save(_hi_path, _hi.data(), _hi.size(), _width)){
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "bright dn was saved to " << _hi_path;
+#endif
+      }
+      if(_lo_path[0] && ::xlingsky::raster::radiometric::save(_lo_path, _lo.data(), _lo.size(), _width)){
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "dark dn was saved to " << _lo_path;
 #endif
       }
     }
   }
-  void SetFilePath(const char *apath, const char *bpath, const char *bppath, const char* xmlpath) {
+  void SetFilePath(const char *apath, const char *bpath, const char *bppath, const char* xmlpath, const char* hi_path, const char* lo_path) {
     if(apath) strcpy(_a_path, apath);
     if(bpath) strcpy(_b_path, bpath);
     if(bppath) strcpy(_bp_path, bppath);
     if(xmlpath) strcpy(_xml_path, xmlpath);
+    if(hi_path) strcpy(_hi_path, hi_path);
+    if(lo_path) strcpy(_lo_path, lo_path);
   }
   bool operator()(int b, int, int, void *data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;
-    float factor_upper = 1-_value_ratio_threshold_upper;
-    float factor_lower = 1+_value_ratio_threshold_lower;
+    float factor_bright = 1-_value_ratio_threshold_bright;
+    float factor_dark = 1+_value_ratio_threshold_dark;
     struct BW {
-      double v_lower;
-      double v_upper;
-      int cnt_lower;
-      int cnt_upper;
+      double v_dark;
+      double v_bright;
+      int cnt_dark;
+      int cnt_bright;
       int stat;
-      BW() : cnt_lower(0), cnt_upper(0), v_lower(0), v_upper(0), stat(0) {}
+      BW() : cnt_dark(0), cnt_bright(0), v_dark(0), v_bright(0), stat(0) {}
     };
     std::vector<BW> bws(rows);
 
@@ -484,36 +561,36 @@ class NucCalculator : public FrameIterator{
       std::sort( t, t+cols);
       int st, ed;
       int n = FindValid(t, cols, st, ed);
-      st += int(n*_cut_ratio_lower);
-      ed -= int(n*_cut_ratio_upper);
+      st += int(n*_cut_ratio_dark);
+      ed -= int(n*_cut_ratio_bright);
       if (ed - st < 0) {
         bws[r].stat = rows+1;
         continue;
       }
-      int cnt_lower = 1, cnt_upper = 1;
-      double v_lower = (double)t[st], v_upper = (double)t[ed];
-      while (st + cnt_lower < ed && cnt_lower < _sample_maxnum_lower) {
-        double v = v_lower/cnt_lower;
-        v *= factor_lower;
-        if(t[st+cnt_lower]>v) break;
-        v_lower += t[st+cnt_lower];
-        ++cnt_lower;
+      int cnt_dark = 1, cnt_bright = 1;
+      double v_dark = (double)t[st], v_bright = (double)t[ed];
+      while (st + cnt_dark < ed && cnt_dark < _sample_maxnum_dark) {
+        double v = v_dark/cnt_dark;
+        v *= factor_dark;
+        if(t[st+cnt_dark]>v) break;
+        v_dark += t[st+cnt_dark];
+        ++cnt_dark;
       }
-      while (ed-cnt_upper>st && cnt_upper < _sample_maxnum_upper) {
-        double v = v_upper/cnt_upper;
-        v *= factor_upper;
-        if(t[ed-cnt_upper] < v ) break;
-        v_upper += t[ed-cnt_upper];
-        ++cnt_upper;
+      while (ed-cnt_bright>st && cnt_bright < _sample_maxnum_bright) {
+        double v = v_bright/cnt_bright;
+        v *= factor_bright;
+        if(t[ed-cnt_bright] < v ) break;
+        v_bright += t[ed-cnt_bright];
+        ++cnt_bright;
       }
-      bws[r].v_lower = v_lower;
-      bws[r].v_upper = v_upper;
-      bws[r].cnt_lower = cnt_lower;
-      bws[r].cnt_upper = cnt_upper;
-      bws[r].stat = (cnt_lower >= _sample_minnum_lower &&
-                     cnt_upper >= _sample_minnum_upper &&
-                     (v_lower / cnt_lower) * factor_lower <
-                     (v_upper / cnt_upper) * factor_upper)?0:1;
+      bws[r].v_dark = v_dark;
+      bws[r].v_bright = v_bright;
+      bws[r].cnt_dark = cnt_dark;
+      bws[r].cnt_bright = cnt_bright;
+      bws[r].stat = (cnt_dark >= _sample_minnum_dark &&
+                     cnt_bright >= _sample_minnum_bright &&
+                     (v_dark / cnt_dark) * factor_dark <
+                     (v_bright / cnt_bright) * factor_bright)?0:1;
     }
 
 // #if defined(DEBUG) || defined(_DEBUG)
@@ -530,42 +607,43 @@ class NucCalculator : public FrameIterator{
 // #endif
 
     xlingsky::TileManager manager;
-    manager.AppendDimension(rows, _line_tile_size, _line_tile_overlap, _line_tile_overlap);
+    manager.AppendDimension(rows, _line_tile_size>rows?rows:_line_tile_size, _line_tile_overlap>rows?rows:_line_tile_overlap, _line_tile_overlap);
 
     std::vector<BW> tile_sum(manager.Size(0));
     std::vector< std::pair<int, float> > valid_tiles;
     for(int t=0; t<manager.Size(0); ++t){
       auto seg = manager.Segment(0, t);
       auto& sum = tile_sum[t];
-      double v_lower[2] = {0,0}, v_upper[2] = {0,0};
-      int cnt_lower[2]={0,0}, cnt_upper[2]={0,0};
-      for(int r=seg.first; r<seg.first+seg.second; ++r){
+      int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
+      double v_dark[2] = {0,0}, v_bright[2] = {0,0};
+      int cnt_dark[2]={0,0}, cnt_bright[2]={0,0};
+      for(int r=seg.first; r<seg.first+tilesize; ++r){
         switch(bws[r].stat){
           case 0:{
-            v_lower[0] += bws[r].v_lower;
-            v_upper[0] += bws[r].v_upper;
-            cnt_lower[0] += bws[r].cnt_lower;
-            cnt_upper[0] += bws[r].cnt_upper;
+            v_dark[0] += bws[r].v_dark;
+            v_bright[0] += bws[r].v_bright;
+            cnt_dark[0] += bws[r].cnt_dark;
+            cnt_bright[0] += bws[r].cnt_bright;
           }break;
           case 1:{
-            v_lower[1] += bws[r].v_lower+bws[r].v_upper;
-            cnt_lower[1] += bws[r].cnt_lower+bws[r].cnt_upper;
+            v_dark[1] += bws[r].v_dark+bws[r].v_bright;
+            cnt_dark[1] += bws[r].cnt_dark+bws[r].cnt_bright;
           }break;
           default:
             break;
         }
       }
-      if(cnt_upper[0]>0){
-        valid_tiles.emplace_back(t, seg.first+(double)seg.second/2.0);
+      if(cnt_bright[0]>0){
+        valid_tiles.emplace_back(t, seg.first+(double)tilesize/2.0);
         sum.stat = 0;
-        sum.cnt_lower = cnt_lower[0];
-        sum.cnt_upper = cnt_upper[0];
-        sum.v_lower = v_lower[0]/cnt_lower[0];
-        sum.v_upper = v_upper[0]/cnt_upper[0];
-      }else if(cnt_lower[1]>0){
+        sum.cnt_dark = cnt_dark[0];
+        sum.cnt_bright = cnt_bright[0];
+        sum.v_dark = v_dark[0]/cnt_dark[0];
+        sum.v_bright = v_bright[0]/cnt_bright[0];
+      }else if(cnt_dark[1]>0){
         sum.stat = 1;
-        sum.cnt_lower = cnt_lower[1];
-        sum.v_lower = v_lower[1]/cnt_lower[1];
+        sum.cnt_dark = cnt_dark[1];
+        sum.v_dark = v_dark[1]/cnt_dark[1];
       }else{
         sum.stat = 2;
       }
@@ -577,17 +655,17 @@ class NucCalculator : public FrameIterator{
         int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
         if(sum.stat==1){
           for (int r = seg.first; r < seg.first + tilesize; ++r) {
-            double v = bws[r].v_lower+bws[r].v_upper;
-            int cnt = bws[r].cnt_lower+bws[r].cnt_upper;
+            double v = bws[r].v_dark+bws[r].v_bright;
+            int cnt = bws[r].cnt_dark+bws[r].cnt_bright;
             v /= cnt;
             switch(_mode){
               case OFFSET:{
                 _a.push_back(1);
-                _b.push_back(v-sum.v_lower);
+                _b.push_back(v-sum.v_dark);
                 _badpixels.push_back(0);
               }break;
               default:{
-                _a.push_back(v/sum.v_lower);
+                _a.push_back(v/sum.v_dark);
                 _b.push_back(0);
                 _badpixels.push_back(0);
               };
@@ -609,85 +687,85 @@ class NucCalculator : public FrameIterator{
         auto& sum = tile_sum[t];
         if (sum.stat == 1) {
           auto seg = manager.Segment(0, t);
-          double x = seg.first + (double)seg.second / 2;
+          int tilesize = (t+1==manager.Size(0)?seg.second:_line_tile_size);
+          double x = seg.first + (double)tilesize / 2;
           double w = 0, hi = 0, lo = 0;
           for (int i = 0; i < valid_tiles.size(); ++i) {
-            double wt = exp(-pow(2.0,x-valid_tiles[i].second)/sigma);
+            double wt = exp(-pow(x-valid_tiles[i].second,2.0)/sigma);
             w += wt;
-            hi += wt*tile_sum[valid_tiles[i].first].v_upper;
-            lo += wt*tile_sum[valid_tiles[i].first].v_lower;
+            hi += wt*tile_sum[valid_tiles[i].first].v_bright;
+            lo += wt*tile_sum[valid_tiles[i].first].v_dark;
           }
           hi /= w;
           lo /= w;
-          if (sum.v_lower < (hi + lo) / 2) {
-            sum.v_upper = hi;
+          if (sum.v_dark < (hi + lo) / 2) {
+            sum.v_bright = hi;
           } else {
-            sum.v_upper = sum.v_lower;
-            sum.v_lower = lo;
+            sum.v_bright = sum.v_dark;
+            sum.v_dark = lo;
           }
-          sum.cnt_lower = 1;
-          sum.cnt_upper = 1;
+          sum.cnt_dark = 1;
+          sum.cnt_bright = 1;
         }
       }
     }
 
-    std::vector<double> dn_high(rows), dn_low(rows);
+    std::vector<double> dn_high(rows,0), dn_low(rows,0), dn_w(rows, 0);
+    // {
+    //   xlingsky::InterpolatorAdaptor* interp = nullptr;
+    //   switch
+    // }
     for (int t = 0; t < manager.Size(0); ++t) {
       auto& sum = tile_sum[t];
+      if(sum.stat>1) continue;
       auto seg = manager.Segment(0, t);
-      int tilesize = (t + 1 == manager.Size(0) ? seg.second : _line_tile_size);
-      if (sum.stat < 2) {
-        for (int r = seg.first; r < seg.first + seg.second; ++r) {
-        }
-      } else {
-          for (int r = 0; r < tilesize; ++r) {
-            _a.push_back(1);
-            _b.push_back(0);
-            _badpixels.push_back(1);
-          }
+      int i=0;
+      while(i<seg.second/2){
+        double w = i+1;
+        int id = seg.first+i;
+        dn_high[id] += w*sum.v_bright;
+        dn_low[id] += w*sum.v_dark;
+        dn_w[id] += w;
+        ++i;
+      }
+      while(i<seg.second){
+        double w = seg.second-i;
+        int id = seg.first+i;
+        dn_high[id] += w*sum.v_bright;
+        dn_low[id] += w*sum.v_dark;
+        dn_w[id] += w;
+        ++i;
       }
     }
 
-    for(int t=0; t<manager.Size(0); ++t){
-      auto seg = manager.Segment(0, t);
-      auto& sum = tile_sum[t];
-      if (sum.cnt_lower<1 || sum.cnt_upper<1) {
-        if (sum.stat == seg.second) {
-          sum.v_upper = 0;
-          sum.cnt_upper = 0;
-          for (int r = seg.first; r < seg.first + seg.second; ++r) {
-            sum.v_upper += bws[r].v_upper+bws[r].v_lower;
-            sum.cnt_upper += bws[r].cnt_upper+bws[r].cnt_lower;
-          }
-          sum.v_upper /= sum.cnt_upper;
-          
+    if(_hi_path[0] || _lo_path[0]){
+      for(int r=0; r<rows; ++r){
+        if(dn_w[r]>std::numeric_limits<double>::epsilon()){
+          _hi.push_back(dn_high[r]/dn_w[r]);
+          _lo.push_back(dn_low[r]/dn_w[r]);
         }else{
+          _hi.push_back(-1);
+          _lo.push_back(-1);
         }
-        continue;
       }
-      double sum_v_lower = sum.v_lower/sum.cnt_lower;
-      double sum_v_upper = sum.v_upper/sum.cnt_upper;
-      for (int r=seg.first; r<seg.first+tilesize; ++r) {
-        if (bws[r].stat > 1) {
-        _a.push_back(1);
-        _b.push_back(0);
-        _badpixels.push_back(1);
-        continue;
+    }
+
+    for(int r=0; r<rows; ++r){
+      if(bws[r].stat<2 && dn_w[r] > std::numeric_limits<double>::epsilon()){
+        auto su = bws[r].v_bright/bws[r].cnt_bright;
+        auto sl = bws[r].v_dark/bws[r].cnt_dark;
+        if(su-sl>std::numeric_limits<double>::epsilon()){
+          auto tu = dn_high[r]/dn_w[r];
+          auto tl = dn_low[r]/dn_w[r];
+          _a.push_back((tu-tl)/(su-sl));
+          _b.push_back(tl-_a.back()*sl);
+          _badpixels.push_back(0);
+          continue;
         }
-        auto tu = bws[r].v_upper/bws[r].cnt_upper;
-        auto tl = bws[r].v_lower/bws[r].cnt_lower;
-        if (tu - tl < std::numeric_limits<double>::epsilon()) {
-        _a.push_back(1);
-        _b.push_back(0);
-        _badpixels.push_back(1);
-        continue;
-        }
-        _a.push_back(
-            (sum_v_upper-sum_v_lower)/(tu-tl)
-                     );
-        _b.push_back(sum_v_lower-_a.back()*tl);
-        _badpixels.push_back(0);
       }
+      _a.push_back(1);
+      _b.push_back(0);
+      _badpixels.push_back(1);
     }
 
     return true;
