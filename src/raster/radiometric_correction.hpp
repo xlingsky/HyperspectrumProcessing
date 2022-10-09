@@ -452,7 +452,9 @@ class NucCalculator : public FrameIterator{
     BSPLINE_CUBIC,
     BSPLINE_QUINTIC,
     BSPLINE_QUADRATIC,
-    BARYCENTRIC
+    BARYCENTRIC,
+    PCHIP,
+    MAKIMA
   };
  private:
   float _cut_ratio_bright;
@@ -466,6 +468,7 @@ class NucCalculator : public FrameIterator{
   float _value_ratio_threshold_bright;
   float _value_ratio_threshold_dark;
   int _mode;
+  InterpType _interp_type;
 
   std::vector<double> _a;
   std::vector<double> _b;
@@ -481,7 +484,7 @@ class NucCalculator : public FrameIterator{
   char _hi_path[512];
   char _lo_path[512];
  public:
-  NucCalculator(int w, float cut_ratio_dark = 0.03, float cut_ratio_bright = 0.1, float ratio_threshold_dark = 0.03, float ratio_threshold_bright = 0.03, int sample_num_dark = 40, int sample_num_bright = 40, int line_tile_size = 30, int line_tile_overlap = 15, int mode = SCALE) : _width(w), _cut_ratio_dark(cut_ratio_dark), _cut_ratio_bright(cut_ratio_bright), _sample_maxnum_dark(sample_num_dark), _sample_maxnum_bright(sample_num_bright), _sample_minnum_dark(3), _sample_minnum_bright(3), _value_ratio_threshold_dark(ratio_threshold_dark), _value_ratio_threshold_bright(ratio_threshold_bright), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap) {
+  NucCalculator(int w, float cut_ratio_dark = 0.03, float cut_ratio_bright = 0.1, float ratio_threshold_dark = 0.03, float ratio_threshold_bright = 0.03, int sample_num_dark = 40, int sample_num_bright = 40, int line_tile_size = 30, int line_tile_overlap = 15, InterpType type = PCHIP, int mode = SCALE) : _width(w), _cut_ratio_dark(cut_ratio_dark), _cut_ratio_bright(cut_ratio_bright), _sample_maxnum_dark(sample_num_dark), _sample_maxnum_bright(sample_num_bright), _sample_minnum_dark(3), _sample_minnum_bright(3), _value_ratio_threshold_dark(ratio_threshold_dark), _value_ratio_threshold_bright(ratio_threshold_bright), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap), _interp_type(type) {
     _a_path[0] = _b_path[0] = _bp_path[0] = _xml_path[0] = 0;
     _hi_path[0] = _lo_path[0] = 0;
   }
@@ -711,10 +714,12 @@ class NucCalculator : public FrameIterator{
     }
 
     std::vector<double> dn_high(rows,0), dn_low(rows,0), dn_w(rows, 0);
-    // {
-    //   xlingsky::InterpolatorAdaptor* interp = nullptr;
-    //   switch
-    // }
+    {
+      xlingsky::InterpolatorAdaptor* interp = nullptr;
+      if (_interp_type < BARYCENTRIC) {
+      } else {
+      }
+    }
     for (int t = 0; t < manager.Size(0); ++t) {
       auto& sum = tile_sum[t];
       if(sum.stat>1) continue;
