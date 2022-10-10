@@ -449,9 +449,6 @@ class NucCalculator : public FrameIterator{
     OFFSET
   };
   enum InterpType{
-    BSPLINE_CUBIC,
-    BSPLINE_QUINTIC,
-    BSPLINE_QUADRATIC,
     BARYCENTRIC,
     PCHIP,
     MAKIMA
@@ -684,6 +681,88 @@ class NucCalculator : public FrameIterator{
       }
       return true;
     }
+
+    std::vector<double> dn_high(rows, 0), dn_low(rows, 0);
+    if (valid_tiles.size() == 1) {
+      for (int r = 0; r < rows; ++r) {
+        dn_high[r] = tile_sum[valid_tiles.front().first].v_bright;
+        dn_low[r] = tile_sum[valid_tiles.front().first].v_dark;
+      }
+    }else {
+      xlingsky::InterpolatorAdaptor* interp = nullptr;
+      std::vector<double> x1, x2, y;
+      x1.reserve(valid_tiles.size()+2);
+      x1.push_back(0);
+      for (auto& t : valid_tiles) x1.push_back(t.second);
+      x1.push_back(rows);
+      x2 = x1;
+
+      y.reserve(valid_tiles.size()+2);
+      y.push_back(tile_sum[valid_tiles.front().first].v_bright);
+      for (auto& t : valid_tiles) y.push_back(tile_sum[t.first].v_bright);
+      y.push_back(tile_sum[valid_tiles.back().first].v_bright);
+      switch (_interp_type) { 
+          case PCHIP:
+            interp = new xlingsky::pchip(std::move(x1), std::move(y));
+            break;
+          case MAKIMA:
+            interp = new xlingsky::makima(std::move(x1), std::move(y));
+            break;
+          case BARYCENTRIC:
+          default:
+            interp =
+                new xlingsky::barycentric_rational(std::move(x1), std::move(y));
+            break;
+      }
+      for (int r = 0; r < rows; ++r) dn_high[r] = interp->operator()(r);
+      delete interp;
+
+      y.reserve(valid_tiles.size()+2);
+      y.push_back(tile_sum[valid_tiles.front().first].v_dark);
+      for (auto& t : valid_tiles) y.push_back(tile_sum[t.first].v_dark);
+      y.push_back(tile_sum[valid_tiles.back().first].v_dark);
+      switch (_interp_type) { 
+          case PCHIP:
+            interp = new xlingsky::pchip(std::move(x2), std::move(y));
+            break;
+          case MAKIMA:
+            interp = new xlingsky::makima(std::move(x2), std::move(y));
+            break;
+          case BARYCENTRIC:
+          default:
+            interp =
+                new xlingsky::barycentric_rational(std::move(x2), std::move(y));
+            break;
+      }
+      for (int r = 0; r < rows; ++r) dn_low[r] = interp->operator()(r);
+      delete interp;
+    }
+
+    if(_hi_path[0] || _lo_path[0]){
+      for(int r=0; r<rows; ++r){
+        _hi.push_back(dn_high[r]);
+        _lo.push_back(dn_low[r]);
+      }
+    }
+
+    for (int r = 0; r < rows; ++r) {
+      if (bws[r].stat < 2) {
+        auto su = bws[r].v_bright / bws[r].cnt_bright;
+        auto sl = bws[r].v_dark / bws[r].cnt_dark;
+        if (su - sl > std::numeric_limits<double>::epsilon()) {
+          auto tu = dn_high[r];
+          auto tl = dn_low[r];
+          _a.push_back((tu - tl) / (su - sl));
+          _b.push_back(tl - _a.back() * sl);
+          _badpixels.push_back(0);
+          continue;
+        }
+      }
+      _a.push_back(1);
+      _b.push_back(0);
+      _badpixels.push_back(1);
+    }
+    /*
     {
       const double sigma = (double)rows*rows/2;
       for (int t = 0; t < tile_sum.size(); ++t) {
@@ -712,14 +791,7 @@ class NucCalculator : public FrameIterator{
         }
       }
     }
-
     std::vector<double> dn_high(rows,0), dn_low(rows,0), dn_w(rows, 0);
-    {
-      xlingsky::InterpolatorAdaptor* interp = nullptr;
-      if (_interp_type < BARYCENTRIC) {
-      } else {
-      }
-    }
     for (int t = 0; t < manager.Size(0); ++t) {
       auto& sum = tile_sum[t];
       if(sum.stat>1) continue;
@@ -771,7 +843,7 @@ class NucCalculator : public FrameIterator{
       _a.push_back(1);
       _b.push_back(0);
       _badpixels.push_back(1);
-    }
+    }*/
 
     return true;
   }

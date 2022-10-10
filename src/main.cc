@@ -368,8 +368,16 @@ int main(int argc, char* argv[]){
               int tile_overlap = v.second.get<int>("tile_overlap", -1);
               bool preferred_a = v.second.get<bool>("a", true);
               bool debug = v.second.get<bool>("debug", true);
-                if(tile_overlap<0) tile_overlap = tile_size/2;
-                xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_dark, cut_ratio_bright, ratio_threshold_dark, ratio_threshold_bright, sample_num_dark, sample_num_bright, tile_size, tile_overlap, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
+              std::string t = v.second.get<std::string>("interp", "pchip");
+              xlingsky::raster::radiometric::NucCalculator::InterpType type;
+              if(t=="makima")
+                type = xlingsky::raster::radiometric::NucCalculator::MAKIMA;
+              else if(t=="barycentric")
+                type = xlingsky::raster::radiometric::NucCalculator::BARYCENTRIC;
+              else
+                type = xlingsky::raster::radiometric::NucCalculator::PCHIP;
+              if(tile_overlap<0) tile_overlap = tile_size/2;
+              xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(buffer_size[store_prior[1]], cut_ratio_dark, cut_ratio_bright, ratio_threshold_dark, ratio_threshold_bright, sample_num_dark, sample_num_bright, tile_size, tile_overlap, type, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
               if(nodata_success) op->SetNoDataValue(nodata);
               char apath[512], bpath[512], bppath[512], xmlpath[512], hipath[512], lopath[512];
               boost::filesystem::path dstpath;
