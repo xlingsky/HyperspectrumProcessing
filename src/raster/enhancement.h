@@ -2,6 +2,7 @@
 #define RASTER_ENHANCEMENT_H
 
 #include "RasterOperator.h"
+#include <opencv2/imgproc.hpp>
 
 namespace xlingsky{
 namespace raster{
@@ -12,7 +13,23 @@ class Destripe : public FrameIterator{
   typedef float DataType;
   Destripe() {}
   virtual ~Destripe(){}
-  bool operator()(int r, void* data, int cols, int rows) override;
+  bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override;
+};
+
+class Despike : public FrameIterator {
+ public:
+};
+
+class Wallis: public FrameIterator {
+ public:
+};
+
+class HistEqualization : public FrameIterator {
+ public:
+};
+
+class Clahe : public FrameIterator {
+ public:
 };
 
 };

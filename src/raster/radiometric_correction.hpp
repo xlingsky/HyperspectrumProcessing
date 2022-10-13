@@ -7,10 +7,11 @@
 #include <string>
 #include <boost/filesystem.hpp>
 
-#include "RasterOperator.h"
-#include "inpaint.hpp"
 #include "TileManager.hpp"
 #include "InterpolatorAdaptor.hpp"
+
+#include "raster/RasterOperator.h"
+#include "raster/detail/inpaint.hpp"
 
 //#define DEBUG
 
@@ -351,7 +352,12 @@ class MeanStdCalculator : public FrameIterator {
  public:
   typedef float DataType;
   MeanStdCalculator(int w, float cut_ratio_lower = 0, float cut_ratio_upper = 0) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper) {}
-  ~MeanStdCalculator() { save(_filepath); }
+  ~MeanStdCalculator() { 
+      if(save(_filepath))
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "Means was saved to " << _filepath;
+#endif
+  }
   std::pair<double, double> compute(DataType* data, int n, float cut_ratio_lower, float cut_ratio_upper) {
     std::pair<double, double> ret = std::make_pair(0, 0);
     int cnt = 0;
@@ -364,7 +370,8 @@ class MeanStdCalculator : public FrameIterator {
     int i = st;
     while(i<=ed){
       ret.first += data[i];
-      ret.second += data[i] * data[i];
+      ret.second += (double)data[i] * data[i];
+      ++i;
     }
     n = ed-st+1;
     if(n>0){
@@ -414,7 +421,12 @@ class MedianCalculator : public FrameIterator {
 
  public:
   MedianCalculator(int w) : _width(w) {}
-  ~MedianCalculator() { save(_filepath); }
+  ~MedianCalculator() { 
+      if(save(_filepath))
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "Medians was saved to " << _filepath;
+#endif
+  }
   void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
   DataType compute(DataType* data, int n) {
     std::sort(data, data + n);

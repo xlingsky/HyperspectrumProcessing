@@ -1,7 +1,7 @@
 #ifndef SPECTRUM_INTERP_HPP
 #define SPECTRUM_INTERP_HPP
 
-#include "RasterOperator.h"
+#include "raster/RasterOperator.h"
 #include "InterpolatorAdaptor.hpp"
 
 namespace xlingsky {

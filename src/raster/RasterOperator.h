@@ -10,7 +10,7 @@ namespace raster {
 
 class Operator {
  public:
-  Operator() {}
+  Operator() : _verbose(0) {}
   virtual ~Operator() {}
   virtual bool operator()(void* data, int imoff[3], int size[3], int space[3],
                           int prior[3]) = 0;

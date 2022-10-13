@@ -68,6 +68,7 @@ class Processor {
   void ReserveBufferSize(size_t size) {
     _buffer.resize(size * GetDataTypeSize());
   }
+  void SetDataType(GDALDataType datatype) { _datatype = datatype; }
   int GetDataTypeSize() const { return GDALGetDataTypeSizeBytes(_datatype); }
   void SetSource(GDALDataset* src) { _src.SetDataset(src); }
   void SetDestination(GDALDataset* dst) { _dst.SetDataset(dst); }

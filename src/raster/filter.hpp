@@ -1,7 +1,7 @@
 #ifndef RASTER_FILTER_HPP
 #define RASTER_FILTER_HPP
 
-#include "RasterOperator.h"
+#include "raster/RasterOperator.h"
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc.hpp>
 

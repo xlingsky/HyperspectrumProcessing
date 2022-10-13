@@ -339,7 +339,15 @@ int main(int argc, char* argv[]){
 			  boutput = 1;
             }else if(name == "statistic"){
               std::string method = v.second.get<std::string>("method", "mean");
-              boost::filesystem::path dstpath(path);
+              boost::filesystem::path dstpath;
+              if(FLAGS_o.empty()){
+                dstpath = path;
+              }else{
+                dstpath = FLAGS_o;
+                if(boost::filesystem::is_directory(dstpath)){
+                  dstpath /= path.filename();
+                }
+              }
               dstpath.replace_extension();
               dstpath += "_"+method+".txt";
               xlingsky::raster::FrameIterator* op = nullptr;

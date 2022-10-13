@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<HSP>
+	<dim_prior>1,0,2</dim_prior>
+	<task name="statistic">
+	  <method>mean</method>
+	</task>
+</HSP>

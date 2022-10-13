@@ -1,43 +1,17 @@
-#include "enhancement.h"
+#ifndef XLINGSKY_DESTRIPE_HPP
+#define XLINGSKY_DESTRIPE_HPP
 
-namespace xlingsky{
-namespace raster{
-namespace enhancement{
-
-class Destripe : public Operator{
+bool Destripe(int tile_width){
   GeglBuffer *src_buffer;
   GeglBuffer *dest_buffer;
   const Babl *format;
   guchar     *src_rows;       /* image data */
-  gdouble     progress, progress_inc;
   gint        x1, x2, y1;
   gint        width, height;
   gint        bpp;
   glong      *hist, *corr;        /* "histogram" data */
   gint        tile_width = gimp_tile_width ();
   gint        i, x, y, ox, cols;
-
-  progress     = 0.0;
-  progress_inc = 0.0;
-
-  if (preview)
-    {
-      gimp_preview_get_position (preview, &x1, &y1);
-      gimp_preview_get_size (preview, &width, &height);
-    }
-  else
-    {
-      gimp_progress_init (_("Destriping"));
-
-      if (! gimp_drawable_mask_intersect (drawable,
-                                          &x1, &y1, &width, &height))
-        {
-          return;
-        }
-
-      progress = 0;
-      progress_inc = 0.5 * tile_width / width;
-    }
 
   x2 = x1 + width;
 
@@ -223,6 +197,5 @@ class Destripe : public Operator{
   g_free (corr);
 }
 
-};
-};
-};
+#endif
+
