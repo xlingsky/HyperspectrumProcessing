@@ -1,78 +1,35 @@
 #ifndef XLINGSKY_DESTRIPE_HPP
 #define XLINGSKY_DESTRIPE_HPP
 
-bool Destripe(int tile_width){
-  GeglBuffer *src_buffer;
-  GeglBuffer *dest_buffer;
-  const Babl *format;
-  guchar     *src_rows;       /* image data */
-  gint        x1, x2, y1;
-  gint        width, height;
-  gint        bpp;
-  glong      *hist, *corr;        /* "histogram" data */
-  gint        tile_width = gimp_tile_width ();
-  gint        i, x, y, ox, cols;
+#include <vector>
 
-  x2 = x1 + width;
+/*
+* destripe along column
+*/
+template<typename DataType, typename HistType = long>
+bool Destripe(
+    int cols, int rows,
+    void* src, int src_col_space, int src_row_space,
+    void* dst, int dst_col_space, int dst_row_space,
+    int win_width
+){
+  std::vector<HistType> hist(cols, 0), corr(cols);
 
-  if (gimp_drawable_is_rgb (drawable))
-    {
-      if (gimp_drawable_has_alpha (drawable))
-        format = babl_format ("R'G'B'A u8");
-      else
-        format = babl_format ("R'G'B' u8");
-    }
-  else
-    {
-      if (gimp_drawable_has_alpha (drawable))
-        format = babl_format ("Y'A u8");
-      else
-        format = babl_format ("Y' u8");
-    }
-
-  bpp = babl_format_get_bytes_per_pixel (format);
-
-  /*
-   * Setup for filter...
-   */
-
-  src_buffer  = gimp_drawable_get_buffer (drawable);
-  dest_buffer = gimp_drawable_get_shadow_buffer (drawable);
-
-  hist = g_new (long, width * bpp);
-  corr = g_new (long, width * bpp);
-  src_rows = g_new (guchar, tile_width * height * bpp);
-
-  memset (hist, 0, width * bpp * sizeof (long));
-
+  char *psrc = (char *)src, *pdst = (char *)dst;
   /*
    * collect "histogram" data.
    */
 
-  for (ox = x1; ox < x2; ox += tile_width)
-    {
-      guchar *rows = src_rows;
-
-      cols = x2 - ox;
-      if (cols > tile_width)
-        cols = tile_width;
-
-      gegl_buffer_get (src_buffer, GEGL_RECTANGLE (ox, y1, cols, height), 1.0,
-                       format, rows,
-                       GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
-
-      for (y = 0; y < height; y++)
-        {
+  for (int c=0; c < cols; ++c) {
+      for (int r = 0; r < rows; y++) {
           long   *h       = hist + (ox - x1) * bpp;
           guchar *row_end = rows + cols * bpp;
 
           while (rows < row_end)
             *h++ += *rows++;
-        }
+       }
 
-      if (! preview)
-        gimp_progress_update (progress += progress_inc);
-    }
+   }
 
   /*
    * average out histogram
