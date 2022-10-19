@@ -15,7 +15,6 @@
 #include "pathadaptor.hpp"
 #include "decode/decode.h"
 #include "raster.hpp"
-#include "raster/gdalex.hpp"
 #include "ipf.hpp"
 #include "pos.h"
 #include "bigfileio.h"
@@ -367,7 +366,7 @@ int main(int argc, char* argv[]){
             }
             else if (name == "nuc"){
               float cut_ratio_dark = v.second.get<float>("cut_dark", 0.03);
-              float cut_ratio_bright = v.second.get<float>("cut_bright", 0.03);
+              float cut_ratio_bright = v.second.get<float>("cut_bright", 0.1);
               float ratio_threshold_dark = v.second.get<float>("threshold_dark", 0.03);
               float ratio_threshold_bright = v.second.get<float>("threshold_bright", 0.03);
               int sample_num_dark = v.second.get<int>("sample_dark", 40);
@@ -474,6 +473,12 @@ int main(int argc, char* argv[]){
               dst_bands = num_samples_new;
               xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(num_lines, wl_old, num_samples_old, wl_new, num_samples_new);
               op->SetInterpType(type);
+              ops->Add(op);
+              boutput = 1;
+            } else if (name == "destripe") {
+              int tile_size = v.second.get<int>("tile_size", 31);
+              xlingsky::raster::enhancement::Destripe* op =
+                  new xlingsky::raster::enhancement::Destripe(tile_size);
               ops->Add(op);
               boutput = 1;
             }

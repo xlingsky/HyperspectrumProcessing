@@ -7,5 +7,6 @@
 #include "raster/gdalex.hpp"
 #include "raster/gdal_traits.hpp"
 #include "raster/RasterProcessor.hpp"
+#include "raster/enhancement.hpp"
 
 #endif

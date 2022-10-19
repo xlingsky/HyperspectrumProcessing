@@ -2,6 +2,8 @@
 #define XLINGSKY_DESTRIPE_HPP
 
 #include <vector>
+#include <limits>
+#include <type_traits>
 
 /*
 * destripe along column
@@ -10,25 +12,23 @@ template<typename DataType, typename HistType = long>
 bool Destripe(
     int cols, int rows,
     void* src, int src_col_space, int src_row_space,
-    void* dst, int dst_col_space, int dst_row_space,
-    int win_width
+    void* dst, int dst_col_space, int dst_row_space, int win_width,
+    HistType hist_mean = std::numeric_limits<typename HistType>::min()
 ){
   std::vector<HistType> hist(cols, 0), corr(cols);
 
-  char *psrc = (char *)src, *pdst = (char *)dst;
+  char *psrc, *pdst;
   /*
    * collect "histogram" data.
    */
-
+  psrc = (char*)src;
   for (int c=0; c < cols; ++c) {
-      for (int r = 0; r < rows; y++) {
-          long   *h       = hist + (ox - x1) * bpp;
-          guchar *row_end = rows + cols * bpp;
-
-          while (rows < row_end)
-            *h++ += *rows++;
-       }
-
+    char *pr_src = psrc;
+    for (int r = 0; r < rows; r++) {
+      hist[c] += (HistType)*((DataType*)pr_src);
+      pr_src += src_row_space;
+    }
+    psrc += src_col_space;
    }
 
   /*
@@ -36,122 +36,92 @@ bool Destripe(
    */
 
   {
-    gint extend = (vals.avg_width / 2) * bpp;
+     int extend = win_width / 2;
+     HistType *h = &hist[0] - extend;
+     HistType *c = &corr[0] - extend;
+     HistType sum = 0;
+     int cnt = 0;
 
-    for (i = 0; i < MIN (3, bpp); i++)
-      {
-        long *h   = hist - extend + i;
-        long *c   = corr - extend + i;
-        long  sum = 0;
-        gint  cnt = 0;
+     for (int x = -extend; x < cols; ++x) {
+       if (x + extend < cols) {
+         sum += h[extend];
+         cnt++;
+       }
 
-        for (x = -extend; x < width * bpp; x += bpp)
-          {
-            if (x + extend < width * bpp)
-              {
-                sum += h[ extend]; cnt++;
-              }
+       if (x - extend >= 0) {
+         sum -= h[-extend];
+         cnt--;
+       }
 
-            if (x - extend >= 0)
-              {
-                sum -= h[-extend]; cnt--;
-              }
+       if (x >= 0) {
+         if (*h) {
+           if (
+               std::is_same<int, HistType>::value || std::is_same<unsigned int, HistType>::value ||
+               std::is_same<long, HistType>::value || std::is_same<unsigned long, HistType>::value ||
+               std::is_same<size_t, HistType>::value
+               )
+             *c = ((sum / cnt - *h) << 10) / *h;
+           else
+             *c = (sum / cnt - *h) / *h;
+         }
+         else
+           *c = std::numeric_limits<HistType>::max();
+       }
 
-            if (x >= 0)
-              {
-                if (*h)
-                  *c = ((sum / cnt - *h) << 10) / *h;
-                else
-                  *c = G_MAXINT;
-              }
-
-            h += bpp;
-            c += bpp;
-          }
-      }
+       ++h;
+       ++c;
+     }
   }
 
   /*
    * remove stripes.
    */
-
-  for (ox = x1; ox < x2; ox += tile_width)
-    {
-      guchar *rows = src_rows;
-
-      cols = x2 - ox;
-      if (cols > tile_width)
-        cols = tile_width;
-
-      gegl_buffer_get (src_buffer, GEGL_RECTANGLE (ox, y1, cols, height), 1.0,
-                       format, rows,
-                       GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
-
-      if (! preview)
-        gimp_progress_update (progress += progress_inc);
-
-      for (y = 0; y < height; y++)
-        {
-          long   *c = corr + (ox - x1) * bpp;
-          guchar *row_end = rows + cols * bpp;
-
-          if (vals.histogram)
-            {
-              while (rows < row_end)
-                {
-                  *rows = MIN (255, MAX (0, 128 + (*rows * *c >> 10)));
-                  c++; rows++;
-                }
-            }
-          else
-            {
-              while (rows < row_end)
-                {
-                  *rows = MIN (255, MAX (0, *rows + (*rows * *c >> 10) ));
-                  c++; rows++;
-                }
-            }
+  psrc = (char*)src;
+  pdst = (char*)dst;
+  for (int x=0; x < cols; ++x) {
+    HistType &c = corr[x];
+    char *pr_src = psrc;
+    char *pr_dst = pdst;
+    if (hist_mean==std::numeric_limits<typename HistType>::min()) {
+      for (int y = 0; y < rows; ++y) {
+        DataType &v = *((DataType *)pr_src);
+        if (std::is_same<int, HistType>::value ||
+            std::is_same<unsigned int, HistType>::value ||
+            std::is_same<long, HistType>::value ||
+            std::is_same<unsigned long, HistType>::value ||
+            std::is_same<size_t, HistType>::value) {
+          *((DataType *)pr_dst) =
+              (DataType)(std::min)(std::numeric_limits<DataType>::max(), std::max(0,v+(v*c>>10)) );
+        } else {
+          *((DataType *)pr_dst) =
+              (DataType)(std::min)(std::numeric_limits<DataType>::max(), std::max(0,v+(v*c)) );
         }
-
-      gegl_buffer_set (dest_buffer, GEGL_RECTANGLE (ox, y1, cols, height), 0,
-                       format, src_rows,
-                       GEGL_AUTO_ROWSTRIDE);
-
-      if (! preview)
-        gimp_progress_update (progress += progress_inc);
+        pr_src += src_row_space;
+        pr_dst += dst_row_space;
+      }
+    } else {
+      for (int y = 0; y < rows; ++y) {
+        DataType &v = *((DataType *)pr_src);
+        if (std::is_same<int, HistType>::value ||
+            std::is_same<unsigned int, HistType>::value ||
+            std::is_same<long, HistType>::value ||
+            std::is_same<unsigned long, HistType>::value ||
+            std::is_same<size_t, HistType>::value) {
+          *((DataType *)pr_dst) =
+              (DataType)(std::min)(std::numeric_limits<DataType>::max(), std::max(0,hist_mean+(v*c>>10)) );
+        } else {
+          *((DataType *)pr_dst) =
+              (DataType)(std::min)(std::numeric_limits<DataType>::max(), std::max(0,hist_mean+(v*c)) );
+        }
+        pr_src += src_row_space;
+        pr_dst += dst_row_space;
+      }
     }
+    psrc += src_col_space;
+    pdst += dst_col_space;
+  }
 
-  g_free (src_rows);
-
-  g_object_unref (src_buffer);
-
-  if (preview)
-    {
-      guchar *buffer = g_new (guchar, width * height * bpp);
-
-      gegl_buffer_get (dest_buffer, GEGL_RECTANGLE (x1, y1, width, height), 1.0,
-                       format, buffer,
-                       GEGL_AUTO_ROWSTRIDE, GEGL_ABYSS_NONE);
-
-      gimp_preview_draw_buffer (GIMP_PREVIEW (preview),
-                                buffer, width * bpp);
-
-      g_free (buffer);
-      g_object_unref (dest_buffer);
-    }
-  else
-    {
-      g_object_unref (dest_buffer);
-
-      gimp_progress_update (1.0);
-
-      gimp_drawable_merge_shadow (drawable, TRUE);
-      gimp_drawable_update (drawable,
-                            x1, y1, width, height);
-    }
-
-  g_free (hist);
-  g_free (corr);
+  return true;
 }
 
 #endif
