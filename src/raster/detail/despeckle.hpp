@@ -16,21 +16,21 @@ struct Histogram {
   value_type step;
   int buckets;
   Histogram() : min(0), step(1), buckets(256) {}
-  int bucket(value_type &v) const { 
+  int bucket(value_type &v) const {
       return (v-min)/step;
   }
 };
 
-typedef struct
+template <typename T>
+struct DespeckleHistogram
 {
   std::vector<int> elems;/* Number of pixels that fall into each luma bucket */
-  std::queue<> origs;/* Original pixels */
-  PixelsList origs[256]; 
-  gint       xmin;
-  gint       ymin;
-  gint       xmax;
-  gint       ymax; /* Source rect */
-} DespeckleHistogram;
+  std::vector< std::queue<T> > origs;/* Original pixels */
+  int       xmin;
+  int       ymin;
+  int       xmax;
+  int       ymax; /* Source rect */
+};
 
 static inline void
 list_add_elem (PixelsList   *list,
