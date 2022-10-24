@@ -424,6 +424,7 @@ int main(int argc, char* argv[]){
                 }
               }
               op->SetFilePath(apath, bpath, bppath, xmlpath, hipath, lopath);
+              op->SetDimOrder(store_prior);
               ops->Add(op);
             }
             else if (name == "interp") {

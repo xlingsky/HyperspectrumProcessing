@@ -492,10 +492,15 @@ class NucCalculator : public FrameIterator{
   char _xml_path[512];
   char _hi_path[512];
   char _lo_path[512];
+
+  int _dim_order[3];
  public:
   NucCalculator(int w, float cut_ratio_dark = 0.03, float cut_ratio_bright = 0.1, float ratio_threshold_dark = 0.03, float ratio_threshold_bright = 0.03, int sample_num_dark = 40, int sample_num_bright = 40, int line_tile_size = 30, int line_tile_overlap = 15, InterpType type = PCHIP, int mode = SCALE) : _width(w), _cut_ratio_dark(cut_ratio_dark), _cut_ratio_bright(cut_ratio_bright), _sample_maxnum_dark(sample_num_dark), _sample_maxnum_bright(sample_num_bright), _sample_minnum_dark(3), _sample_minnum_bright(3), _value_ratio_threshold_dark(ratio_threshold_dark), _value_ratio_threshold_bright(ratio_threshold_bright), _mode(mode), _line_tile_size(line_tile_size), _line_tile_overlap(line_tile_overlap), _interp_type(type) {
     _a_path[0] = _b_path[0] = _bp_path[0] = _xml_path[0] = 0;
     _hi_path[0] = _lo_path[0] = 0;
+    _dim_order[0] = 0;
+    _dim_order[1] = 1;
+    _dim_order[2] = 2;
   }
   ~NucCalculator() {
     if(_a_path[0]) {
@@ -520,7 +525,7 @@ class NucCalculator : public FrameIterator{
       if(fp){
         fprintf(fp, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
         fprintf(fp, "<HSP>\n");
-        fprintf(fp, "\t<dim_prior>0,2,1</dim_prior>\n");
+        fprintf(fp, "\t<dim_prior>%d,%d,%d</dim_prior>\n", _dim_order[1], _dim_order[2], _dim_order[0]);
         fprintf(fp, "\t<task name=\"uniform\">\n");
         fprintf(fp, "\t\t<a>%s</a>\n", _a_path);
         fprintf(fp, "\t\t<b>%s</b>\n", _b_path);
@@ -543,6 +548,7 @@ class NucCalculator : public FrameIterator{
       }
     }
   }
+  void SetDimOrder(int order[3]) { memcpy(_dim_order, order, 3*sizeof(int)); }
   void SetFilePath(const char *apath, const char *bpath, const char *bppath, const char* xmlpath, const char* hi_path, const char* lo_path) {
     if(apath) strcpy(_a_path, apath);
     if(bpath) strcpy(_b_path, bpath);
