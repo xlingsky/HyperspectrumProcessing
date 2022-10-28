@@ -3,6 +3,7 @@
 
 #include "RasterOperator.h"
 #include <opencv2/imgproc.hpp>
+#include "raster/detail/despeckle.hpp"
 
 namespace xlingsky{
 namespace raster{
@@ -111,10 +112,73 @@ class Destripe : public FrameIterator{
 
 class Despeckle : public FrameIterator {
  public:
-  Despeckle() {}
+  typedef float DataType;
+  typedef xlingsky::raster::enhancement::detail::DespeckleHistogram<DataType> HistType;
+  enum FilterType{
+    ADAPTIVE = 0x01,
+    RECURSIVE = 0x02
+  };
+ protected:
+  int _radius;
+  int _filter_type;
+  DataType _minimum;
+  DataType _unbounded_maximum;
+  DataType _step;
+ public:
+  Despeckle(int radius = 3, DataType start = 7, DataType end = 4000, DataType step = 1, int filter_type = ADAPTIVE)
+      : _radius(radius), _filter_type(filter_type), _minimum(start), _unbounded_maximum(end), _step(step) {}
   virtual ~Despeckle(){}
-  bool operator()(int b, int xoff, int yoff, void* data, int cols,
-      int rows) override {
+  bool operator()(int , int , int , void* data, int cols, int rows) override {
+    int adapt_radius = _radius;
+    int pixelspace = 1;
+    int linespace = cols;
+    DataType* pdata = (DataType*)data;
+    for (int y = 0; y < rows; y++) {
+      int x = 0;
+      int ymin = MAX (0, y - adapt_radius);
+      int ymax = MIN (rows - 1, y + adapt_radius);
+      int xmin = MAX (0, x - adapt_radius);
+      int xmax = MIN (cols - 1, x + adapt_radius);
+      HistType hist(_minimum, _unbounded_maximum, _step);
+      hist.set_rect(xmin, ymin, xmax, ymax);
+      hist.adds(pdata, pixelspace, linespace, xmin, ymin, xmax, ymax);
+
+      for (x = 1; x < cols; x++)
+      {
+        ymin = MAX (0, y - adapt_radius); /* update ymin, ymax when adapt_radius changed (FILTER_ADAPTIVE) */
+        ymax = MIN (rows- 1, y + adapt_radius);
+        xmin = MAX (0, x - adapt_radius);
+        xmax = MIN (cols - 1, x + adapt_radius);
+
+        hist.update(pdata, pixelspace, linespace, xmin, ymin, xmax, ymax);
+
+        int pos = x*pixelspace + (y * linespace);
+        auto pixel = hist.median (pdata[pos]);
+
+        if (_filter_type & RECURSIVE)
+        {
+          hist.del (pdata+pos);
+          hist.add (&pixel);
+        }
+
+        pdata[pos] = pixel;
+        /*
+         * Check the histogram and adjust the diameter accordingly...
+         */
+        if (_filter_type & ADAPTIVE)
+        {
+          if (hist.under_minimum_count() >= adapt_radius || hist.beyond_maximum_count() >= adapt_radius)
+          {
+            if (adapt_radius < _radius)
+              adapt_radius++;
+          }
+          else if (adapt_radius > 1)
+          {
+            adapt_radius--;
+          }
+        }
+      }
+    }
     return true;
   }
 };
