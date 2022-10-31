@@ -309,12 +309,12 @@ int main(int argc, char* argv[]){
                 ops->Add(op);
                 boutput = 1;
             }else if (name == "median") {
-                int ksize = v.second.get<int>("ksize");
+                int ksize = v.second.get<int>("ksize", 3);
                 std::string method = v.second.get<std::string>("method", "adapt");
                 xlingsky::raster::Operator* op = nullptr;
                 if(method == "adapt"){
-                  float start = v.second.get<float>("hist_start", 7);
-                  float end = v.second.get<float>("hist_end", 4000);
+                  float start = v.second.get<float>("hist_min", 7);
+                  float end = v.second.get<float>("hist_max", 4000);
                   float step = v.second.get<float>("hist_step", 1);
                   xlingsky::raster::enhancement::Despeckle* p = new xlingsky::raster::enhancement::Despeckle(ksize, start, end, step);
                   op = p;

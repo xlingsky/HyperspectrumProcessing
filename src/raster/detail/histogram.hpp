@@ -96,7 +96,7 @@ class Histogram{
   }
   virtual value_type random_elem (int bucket) const
   {
-    const float factor = 0.5;
+    const static float factor = _buckets.step()==1?0:0.5;//0.5;
     return _buckets.bounded_minimum(bucket)+(value_type)(factor*_buckets.step());
   }
   index_type median(int count) const{

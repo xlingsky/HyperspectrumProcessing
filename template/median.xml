@@ -1,0 +1,7 @@
+<HSP>
+<dim_prior>0,1,2</dim_prior>
+<task name="median">
+  <hist_min>7</hist_min>
+  <hist_max>248</hist_max>
+</task>
+</HSP>

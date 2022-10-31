@@ -132,7 +132,16 @@ class Despeckle : public FrameIterator {
     int adapt_radius = _radius;
     int pixelspace = 1;
     int linespace = cols;
+    std::vector<DataType> buffer;
     DataType* pdata = (DataType*)data;
+    DataType* src = pdata;
+    DataType* dst = nullptr;
+    if(_filter_type & RECURSIVE){
+      dst = src;
+    }else{
+      buffer.resize((size_t)cols*rows);
+      dst = &buffer[0];
+    }
     for (int y = 0; y < rows; y++) {
       int x = 0;
       int ymin = MAX (0, y - adapt_radius);
@@ -141,27 +150,27 @@ class Despeckle : public FrameIterator {
       int xmax = MIN (cols - 1, x + adapt_radius);
       HistType hist(_minimum, _unbounded_maximum, _step);
       hist.set_rect(xmin, ymin, xmax, ymax);
-      hist.adds(pdata, pixelspace, linespace, xmin, ymin, xmax, ymax);
+      hist.adds(src, pixelspace, linespace, xmin, ymin, xmax, ymax);
 
-      for (x = 1; x < cols; x++)
+      for (x = 0; x < cols; x++)
       {
         ymin = MAX (0, y - adapt_radius); /* update ymin, ymax when adapt_radius changed (FILTER_ADAPTIVE) */
         ymax = MIN (rows- 1, y + adapt_radius);
         xmin = MAX (0, x - adapt_radius);
         xmax = MIN (cols - 1, x + adapt_radius);
 
-        hist.update(pdata, pixelspace, linespace, xmin, ymin, xmax, ymax);
+        hist.update(src, pixelspace, linespace, xmin, ymin, xmax, ymax);
 
         int pos = x*pixelspace + (y * linespace);
-        auto pixel = hist.median (pdata[pos]);
+        auto pixel = hist.median (src[pos]);
 
         if (_filter_type & RECURSIVE)
         {
-          hist.del (pdata+pos);
+          hist.del (src+pos);
           hist.add (&pixel);
         }
 
-        pdata[pos] = pixel;
+        dst[pos] = pixel;
         /*
          * Check the histogram and adjust the diameter accordingly...
          */
@@ -179,6 +188,8 @@ class Despeckle : public FrameIterator {
         }
       }
     }
+    if(dst!=pdata)
+      memcpy(pdata, dst, sizeof(DataType)*cols*rows);
     return true;
   }
 };
@@ -187,7 +198,7 @@ class Wallis: public FrameIterator {
  public:
   Wallis() {}
   virtual ~Wallis(){}
-  bool operator()(int b, int xoff, int yoff, void* data, int cols,
+  bool operator()(int , int , int , void* data, int cols,
       int rows) override {
     return true;
   }
