@@ -353,10 +353,11 @@ class MeanStdCalculator : public FrameIterator {
   typedef float DataType;
   MeanStdCalculator(int w, float cut_ratio_lower = 0, float cut_ratio_upper = 0) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper) {}
   ~MeanStdCalculator() { 
-      if(save(_filepath))
+      if (save(_filepath)) {
 #ifdef _LOGGING
         VLOG(_LOG_LEVEL_RADIOMETRIC) << "Means was saved to " << _filepath;
 #endif
+      }
   }
   std::pair<double, double> compute(DataType* data, int n, float cut_ratio_lower, float cut_ratio_upper) {
     std::pair<double, double> ret = std::make_pair(0, 0);
@@ -422,10 +423,11 @@ class MedianCalculator : public FrameIterator {
  public:
   MedianCalculator(int w) : _width(w) {}
   ~MedianCalculator() { 
-      if(save(_filepath))
+      if (save(_filepath)) {
 #ifdef _LOGGING
         VLOG(_LOG_LEVEL_RADIOMETRIC) << "Medians was saved to " << _filepath;
 #endif
+    }
   }
   void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
   DataType compute(DataType* data, int n) {

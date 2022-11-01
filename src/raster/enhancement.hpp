@@ -206,9 +206,25 @@ class Wallis: public FrameIterator {
 
 class HistEqualization : public FrameIterator {
  public:
+  typedef float SrcType; 
+  typedef SrcType DstType;
+  typedef xlingsky::raster::detail::Histogram<SrcType> HistType;
+  class LookupTable {
+   public:
+  };
+ protected:
+  SrcType _src_minimum;
+  SrcType _src_unbounded_maximum;
+  SrcType _src_step;
+  float _cut_ratio_upper;
+  float _cut_ratio_lower;
+
+ protected:
+     HistType* CreateHist(SrcType* data, int cols, int rows, ) {}
+ public:
   HistEqualization() {}
   virtual ~HistEqualization(){}
-  bool operator()(int b, int xoff, int yoff, void* data, int cols,
+  bool operator()(int , int , int , void* data, int cols,
       int rows) override {
     return true;
   }
