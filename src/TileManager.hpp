@@ -1,5 +1,5 @@
-#ifndef TILE_MANAGER_HPP
-#define TILE_MANAGER_HPP
+#ifndef XLINGSKY_TILE_MANAGER_HPP
+#define XLINGSKY_TILE_MANAGER_HPP
 
 #include <vector>
 

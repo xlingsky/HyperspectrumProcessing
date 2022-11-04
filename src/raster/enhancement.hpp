@@ -1,9 +1,10 @@
-#ifndef RASTER_ENHANCEMENT_H
-#define RASTER_ENHANCEMENT_H
+#ifndef XLINGSKY_RASTER_ENHANCEMENT_H
+#define XLINGSKY_RASTER_ENHANCEMENT_H
 
-#include "RasterOperator.h"
+#include "raster/operator.h"
 #include <opencv2/imgproc.hpp>
 #include "raster/detail/despeckle.hpp"
+#include "raster/detail/lookup.hpp"
 
 namespace xlingsky{
 namespace raster{
@@ -204,28 +205,98 @@ class Wallis: public FrameIterator {
   }
 };
 
-class HistEqualization : public FrameIterator {
+class Render : public FrameIterator {
  public:
-  typedef float SrcType; 
+  typedef float SrcType;
   typedef SrcType DstType;
-  typedef xlingsky::raster::detail::Histogram<SrcType> HistType;
-  class LookupTable {
-   public:
+  typedef xlingsky::raster::Histogram<SrcType> HistType;
+  enum Mode{
+    MINMAX = 0x01,
+    CLIP = 0x02,
+    HIST_EQU = 0x04,
+    GLOBAL = 0x08
   };
  protected:
   SrcType _src_minimum;
   SrcType _src_unbounded_maximum;
+  DstType _dst_minimum;
+  DstType _dst_maximum;
+  int _mode;
+
   SrcType _src_step;
+  int _hist_col_step;
+  int _hist_row_step;
   float _cut_ratio_upper;
   float _cut_ratio_lower;
 
- protected:
-     HistType* CreateHist(SrcType* data, int cols, int rows, ) {}
+  xlingsky::raster::detail::Lookup<SrcType, DstType>* _lookup;
+
  public:
-  HistEqualization() {}
-  virtual ~HistEqualization(){}
+  Render(SrcType src_min, SrcType src_umax, DstType dst_min, DstType dst_umax, int mode = MINMAX|CLIP)
+      :  _src_minimum(src_min), _src_unbounded_maximum(src_umax),
+         _dst_minimum(dst_min), _dst_maximum(dst_umax),
+         _mode(mode), _lookup(nullptr),
+         _src_step(1), _hist_col_step(3), _hist_row_step(3), _cut_ratio_upper(0.002), _cut_ratio_lower(0.002) {}
+  virtual ~Render(){
+    if(_lookup) delete _lookup;
+  }
+  void set_src_step(SrcType step) {
+    _src_step = step;
+  }
+  void set_hist_interval(int col, int row){
+    _hist_col_step = col;
+    _hist_row_step = row;
+  }
+  void set_clip_ratio(float lower, float upper){
+    _cut_ratio_lower = lower;
+    _cut_ratio_upper = upper;
+  }
   bool operator()(int , int , int , void* data, int cols,
       int rows) override {
+    if(_lookup==nullptr){
+      if((_mode&CLIP) || (_mode&HIST_EQU)){
+        HistType hist(_src_minimum, _src_unbounded_maximum, _src_step);
+        hist.adds((const SrcType*)data, MAX(1, cols/_hist_col_step), MAX(1, rows/_hist_row_step), _hist_col_step, cols*_hist_row_step);
+        if(_mode&CLIP) hist.cut(_cut_ratio_lower, _cut_ratio_upper);
+        if(_mode&HIST_EQU){
+          std::vector<DstType> table;
+          {
+            auto accum = hist.accumulation();
+            auto minimum = accum.front();
+            auto maximum = accum.back();
+            DstType a = 0;
+            if(maximum-minimum>std::numeric_limits<SrcType>::epsilon())
+              a = (_dst_maximum-_dst_minimum)/(maximum-minimum);
+            xlingsky::raster::detail::LookupLinear<SrcType, DstType> p(a, (DstType)(_dst_minimum-a*minimum));
+            table.resize(accum.size());
+            for(int i=0; i<accum.size(); ++i)
+              table[i] = p[accum[i]];
+          }
+          xlingsky::raster::detail::LookupMap<SrcType, DstType>* p = new xlingsky::raster::detail::LookupMap<SrcType, DstType>();
+          p->set_buckets(_src_minimum, _src_unbounded_maximum, _src_step);
+          p->set_table(table.begin(), table.end());
+          _lookup = p;
+        }else{
+          SrcType minimum = hist.value(0);
+          SrcType maximum = hist.value(hist.range().buckets()-1);
+          DstType a = 0;
+          if(maximum-minimum>std::numeric_limits<SrcType>::epsilon())
+            a = (_dst_maximum-_dst_minimum)/(maximum-minimum);
+          _lookup = new xlingsky::raster::detail::LookupLinear<SrcType, DstType>(a,_dst_minimum-a*minimum);
+        }
+      }else{
+        assert((_src_unbounded_maximum-_src_minimum)>std::numeric_limits<SrcType>::epsilon());
+        auto a = (_dst_maximum-_dst_minimum)/(_src_unbounded_maximum-_src_minimum);
+        _lookup = new xlingsky::raster::detail::LookupLinear<SrcType, DstType>(a,_dst_minimum-a*_src_minimum);
+      }
+    }
+
+    transform(data, cols, rows, sizeof(SrcType), cols*sizeof(SrcType), *_lookup);
+
+    if(!(_mode&GLOBAL)){
+      delete _lookup;
+      _lookup = nullptr;
+    }
     return true;
   }
 };

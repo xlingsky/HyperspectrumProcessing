@@ -1,5 +1,5 @@
-#ifndef RASTER_OPERATOR_H
-#define RASTER_OPERATOR_H
+#ifndef XLINGSKY_RASTER_OPERATOR_H
+#define XLINGSKY_RASTER_OPERATOR_H
 
 #include <vector>
 #include <numeric>

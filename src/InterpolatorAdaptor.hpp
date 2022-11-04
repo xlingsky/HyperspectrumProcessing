@@ -1,5 +1,5 @@
-#ifndef INTERPOLATOR_ADAPTOR_HPP
-#define INTERPOLATOR_ADAPTOR_HPP
+#ifndef XLINGSKY_INTERPOLATOR_ADAPTOR_HPP
+#define XLINGSKY_INTERPOLATOR_ADAPTOR_HPP
 
 #include <boost/math/interpolators/cardinal_quadratic_b_spline.hpp>
 #include <boost/math/interpolators/barycentric_rational.hpp>

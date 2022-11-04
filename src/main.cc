@@ -5,6 +5,7 @@
 #include <set>
 #include <iostream>
 #include <limits>
+#include <cctype>
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -32,6 +33,7 @@ DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
 DEFINE_string(gcp, "", "pos to add gcp to tif");
 DEFINE_string(nodata, "", "specify the nodata value.");
 DEFINE_int32(fc, 1, "flush cache mode: 0, 1, 2");
+DEFINE_string(ot, "", "output data type {Byte/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/CInt16/CInt32/CFloat32/CFloat64}");
 
 bool IsRaw(boost::filesystem::path& file){
   std::string ext;
@@ -493,6 +495,43 @@ int main(int argc, char* argv[]){
                   new xlingsky::raster::enhancement::Destripe(tile_size);
               ops->Add(op);
               boutput = 1;
+            }else if(name == "render"){
+              float src_min = v.second.get<float>("src_min", 7);
+              float src_umax = v.second.get<float>("src_umax", 4000);
+              float dst_min = v.second.get<float>("dst_min", 0);
+              float dst_max = v.second.get<float>("dst_max", 255);
+              if(FLAGS_ot.empty()){
+                if(dst_max<(int)std::numeric_limits<unsigned char>::max()+1)
+                  FLAGS_ot = "byte";
+              }
+              std::string m = v.second.get<std::string>("mode", "MINMAX|CLIP");
+              std::transform(m.begin(), m.end(), m.begin(),
+                             [](unsigned char c){ return std::tolower(c); });
+              int mode = 0;
+              if(m.find("minmax")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Render::MINMAX;
+              if(m.find("clip")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Render::CLIP;
+              if(m.find("hist")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Render::HIST_EQU;
+              if(m.find("global")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Render::GLOBAL;
+              xlingsky::raster::enhancement::Render* op =
+                  new xlingsky::raster::enhancement::Render(src_min, src_umax, dst_min, dst_max, mode);
+              if ((mode & xlingsky::raster::enhancement::Render::CLIP) ||
+                  (mode & xlingsky::raster::enhancement::Render::HIST_EQU)) {
+                float src_step = v.second.get<float>("src_step", 1);
+                int hist_col_step = v.second.get<float>("hist_col_step", 3);
+                int hist_row_step = v.second.get<float>("hist_row_step", 3);
+                op->set_src_step(src_step);
+                op->set_hist_interval(hist_col_step, hist_row_step);
+                float cut_ratio_lower = v.second.get<float>("cut_lower", 0.002);
+                float cut_ratio_upper = v.second.get<float>("cut_upper", 0.002);
+                op->set_clip_ratio(cut_ratio_lower, cut_ratio_upper);
+              }
+
+              ops->Add(op);
+              boutput = 1;
             }
         }
 
@@ -513,9 +552,19 @@ int main(int argc, char* argv[]){
           }
         }
         if (!outpath.empty()) {
+          GDALDataType datatype =src->GetRasterBand(1)->GetRasterDataType();
+          {
+            if(!FLAGS_ot.empty()){
+              const char* tag_name[] = {"byte", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "cint16", "cint32", "cfloat32", "cfloat64"};
+              GDALDataType tag_type[] = {GDT_Byte, GDT_UInt16, GDT_Int16, GDT_UInt32, GDT_Int32, GDT_UInt64, GDT_Int64, GDT_Float32, GDT_Float64, GDT_CInt16, GDT_CInt32, GDT_CFloat32, GDT_CFloat64};
+              std::transform(FLAGS_ot.begin(), FLAGS_ot.end(), FLAGS_ot.begin(),
+                             [](unsigned char c){ return std::tolower(c); });
+              for(int i=0; i<sizeof(tag_name)/sizeof(tag_name[0]); ++i)
+                if(FLAGS_ot==tag_name[i]) { datatype = tag_type[i]; break; }
+            }
+          }
           dst = GDALCreate(outpath.string().c_str(), dst_cols, dst_rows,
-                           dst_bands,
-                           src->GetRasterBand(1)->GetRasterDataType());
+                           dst_bands, datatype);
           if (dst == nullptr) {
             GDALClose(src);
             return 1;

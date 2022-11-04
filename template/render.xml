@@ -1,0 +1,12 @@
+<HSP>
+<dim_prior>0,1,2</dim_prior>
+<task name="render">
+  <src_min>0</src_min>
+  <src_umax>4000</src_umax>
+  <dst_min>0</dst_min>
+  <dst_max>255</dst_max>
+  <hist_col_step>5</hist_col_step>
+  <hist_row_step>5</hist_row_step>
+  <mode>minmax|clip</mode>
+</task>
+</HSP>

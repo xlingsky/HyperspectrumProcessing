@@ -1,5 +1,5 @@
-#ifndef RADIOMETRIC_CORRECTION_HPP
-#define RADIOMETRIC_CORRECTION_HPP
+#ifndef XLINGSKY_RASTER_RADIOMETRIC_HPP
+#define XLINGSKY_RASTER_RADIOMETRIC_HPP
 
 #include <assert.h>
 #include <vector>
@@ -10,7 +10,7 @@
 #include "TileManager.hpp"
 #include "InterpolatorAdaptor.hpp"
 
-#include "raster/RasterOperator.h"
+#include "raster/operator.h"
 #include "raster/detail/inpaint.hpp"
 
 //#define DEBUG
@@ -315,7 +315,7 @@ class BadPixelCorrection : public FrameIterator {
     cv::Mat mask = _mask(cv::Rect(xoff, yoff, cols, rows));
 
     cv::Mat m(rows, cols, cv::DataType<DataType>::type, data);
-    InpaintOp op(m, m, mask);
+    detail::InpaintOp op(m, m, mask);
     xlingsky::TileManager manager;
     const int margin = 10;
     const int tilesize = rows;

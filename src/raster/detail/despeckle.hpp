@@ -1,7 +1,7 @@
-#ifndef XLINGSKY_DESPECKLE_HPP
-#define XLINGSKY_DESPECKLE_HPP
+#ifndef XLINGSKY_RASTER_ENHANCEMENT_DETAIL_DESPECKLE_HPP
+#define XLINGSKY_RASTER_ENHANCEMENT_DETAIL_DESPECKLE_HPP
 
-#include "raster/detail/histogram.hpp"
+#include "raster/histogram.hpp"
 
 namespace xlingsky{
 namespace raster{
@@ -9,9 +9,9 @@ namespace enhancement {
 namespace detail{
 
 template<typename T>
-class DespeckleHistogram : public xlingsky::raster::detail::Histogram<T>{
+class DespeckleHistogram : public xlingsky::raster::Histogram<T>{
  public:
-  typedef xlingsky::raster::detail::Histogram<T> base;
+  typedef xlingsky::raster::Histogram<T> base;
   typedef typename base::value_type value_type;
   typedef typename base::reference_type reference_type;
   typedef typename base::index_type index_type;
@@ -31,35 +31,17 @@ class DespeckleHistogram : public xlingsky::raster::detail::Histogram<T>{
   }
   void adds(reference_type src, int pixelspace, int linespace, int xmin,
             int ymin, int xmax, int ymax) {
-    int x;
-    int y;
-
     if (xmin > xmax)
       return;
 
-    for (y = ymin; y <= ymax; y++)
-    {
-      for (x = xmin; x <= xmax; x++)
-      {
-        base::add(src+y*linespace+x*pixelspace);
-      }
-    }
+    base::adds(src+xmin*pixelspace+ymin*linespace, xmax-xmin+1, ymax-ymin+1, pixelspace, linespace);
   }
   void dels(reference_type src, int pixelspace, int linespace, int xmin,
             int ymin, int xmax, int ymax) {
-    int x;
-    int y;
-
     if (xmin > xmax)
       return;
 
-    for (y = ymin; y <= ymax; y++)
-    {
-      for (x = xmin; x <= xmax; x++)
-      {
-        base::del(src+y*linespace+x*pixelspace);
-      }
-    }
+    base::dels(src+xmin*pixelspace+ymin*linespace, xmax-xmin+1, ymax-ymin+1, pixelspace, linespace);
   }
   void update(reference_type src, int pixelspace, int linespace, int xmin,
               int ymin, int xmax, int ymax){

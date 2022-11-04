@@ -1,7 +1,7 @@
-#ifndef RASTER_PROCESSOR_HPP
-#define RASTER_PROCESSOR_HPP
+#ifndef XLINGSKY_RASTER_PROCESSOR_HPP
+#define XLINGSKY_RASTER_PROCESSOR_HPP
 
-#include "RasterOperator.h"
+#include "raster/operator.h"
 #include "TileManager.hpp"
 
 #include <gdal_priv.h>

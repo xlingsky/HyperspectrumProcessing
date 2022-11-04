@@ -1,8 +1,12 @@
-#ifndef INPAINT_HPP
-#define INPAINT_HPP
+#ifndef XLINGSKY_RASTER_DETAIL_INPAINT_HPP
+#define XLINGSKY_RASTER_DETAIL_INPAINT_HPP
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/photo.hpp>
+
+namespace xlingsky{
+namespace raster{
+namespace detail{
 
 class InpaintOp{
  private:
@@ -20,6 +24,10 @@ class InpaintOp{
     tile(aoi).copyTo(_dst(dst_tile));
     return true;
   }
+};
+
+};
+};
 };
 
 #endif

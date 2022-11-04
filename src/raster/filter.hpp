@@ -1,7 +1,7 @@
-#ifndef RASTER_FILTER_HPP
-#define RASTER_FILTER_HPP
+#ifndef XLINGSKY_RASTER_FILTER_HPP
+#define XLINGSKY_RASTER_FILTER_HPP
 
-#include "raster/RasterOperator.h"
+#include "raster/operator.h"
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc.hpp>
 

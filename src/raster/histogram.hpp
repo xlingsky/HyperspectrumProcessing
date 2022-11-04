@@ -1,13 +1,16 @@
-#ifndef XLINGSKY_HISTOGRAM_HPP
-#define XLINGSKY_HISTOGRAM_HPP
+#ifndef XLINGSKY_RASTER_HISTOGRAM_HPP
+#define XLINGSKY_RASTER_HISTOGRAM_HPP
+
+//may use boost histogram instead in future
 
 #include <deque>
 #include <vector>
 #include <type_traits>
 
+#include "raster/transform.hpp"
+
 namespace xlingsky {
 namespace raster {
-namespace detail {
 
 template <typename T>
 struct Range {
@@ -25,7 +28,7 @@ struct Range {
     _step = step;
     _buckets = int((end-start)/step);
   }
-  int bucket(const value_type &v) const {
+  int bucket(value_type v) const {
     return int((v-_bounded_minimum)/_step);
   }
   int buckets() const { return _buckets; }
@@ -40,19 +43,19 @@ class Histogram{
  public:
   typedef T value_type;
   typedef const T* reference_type;
-  typedef Range<T> Buckets;
+  typedef Range<T> Range;
   typedef int index_type;
   typedef Histogram<T> self;
  protected:
   std::vector<index_type> _count;
-  Buckets _buckets;
+  Range _range;
   index_type _valid_count;
   index_type _under_minimum_count;
   index_type _beyond_maximum_count;
  public:
   Histogram(value_type start = 0, value_type end = 256, value_type step = 1)
-      : _buckets(start, end, step), _valid_count(0), _under_minimum_count(0), _beyond_maximum_count(0) {
-    _count.resize(_buckets.buckets(), 0);
+      : _range(start, end, step), _valid_count(0), _under_minimum_count(0), _beyond_maximum_count(0) {
+    _count.resize(_range.buckets(), 0);
  }
   virtual void clear() {
     for(auto& c : _count)
@@ -63,41 +66,80 @@ class Histogram{
     resize(start, end, step);
     clear();
   }
+  void cut( float cut_lower, float cut_upper){
+    int cut_lower_count = (int)(_valid_count*cut_lower);
+    int cut_upper_count = (int)(_valid_count*cut_upper);
+
+    int st = 0, ed = _count.size()-1;
+    while((cut_lower_count-=_count[st])>=0) ++st;
+    while((cut_upper_count-=_count[ed])>=0) --ed;
+    cut(st, ed);
+  }
   void add(reference_type orig){
-    if(*orig<_buckets.bounded_minimum()) ++_under_minimum_count;
-    else if(*orig>=_buckets.unbounded_maximun()) ++_beyond_maximum_count;
+    if(*orig<_range.bounded_minimum()) ++_under_minimum_count;
+    else if(*orig>=_range.unbounded_maximun()) ++_beyond_maximum_count;
     else{
-      add(_buckets.bucket(*orig), orig);
+      add(_range.bucket(*orig), orig);
       ++_valid_count;
     }
   }
   void del(reference_type orig){
-    if(*orig<_buckets.bounded_minimum()) --_under_minimum_count;
-    else if(*orig>=_buckets.unbounded_maximun()) --_beyond_maximum_count;
+    if(*orig<_range.bounded_minimum()) --_under_minimum_count;
+    else if(*orig>=_range.unbounded_maximun()) --_beyond_maximum_count;
     else{
-      del(_buckets.bucket(*orig), orig);
+      del(_range.bucket(*orig), orig);
       --_valid_count;
     }
   }
-  int bucket(value_type& v) const { return _buckets.bucket(v); }
-  int buckets() const { return _buckets.buckets(); }
+#define BATCH_FUNCTION(name)                                            \
+  void name##s(reference_type src, int cols, int rows, int pixelspace, int linespace) { \
+  if(cols<=0 || rows<=0 ) return;                                       \
+  struct _##name{                                                       \
+    self* _p;                                                           \
+    _##name(self* p) : _p(p) {}                                         \
+    void operator()(const void* data){                                  \
+      _p->name((reference_type)data);                                 \
+    }                                                                   \
+  } op(this);                                                           \
+  xlingsky::raster::transform(src, cols, rows, pixelspace*sizeof(value_type), linespace*sizeof(value_type), op); \
+  }
+
+  BATCH_FUNCTION(add);
+  BATCH_FUNCTION(del);
+
+  int bucket(value_type& v) const { return _range.bucket(v); }
+  const Range& range() const { return _range; }
   index_type count(int bucket) const { return _count[bucket]; }
   value_type median(value_type _default) const{
     index_type i = median(_valid_count);
     if(i==(index_type)-1) return _default;
     return random_elem(i);
   }
+  value_type value(int bucket) const {
+    return random_elem(bucket);
+  }
   index_type under_minimum_count() const { return _under_minimum_count; }
   index_type beyond_maximum_count() const { return _beyond_maximum_count; }
+  std::vector<index_type> accumulation() const {
+    std::vector<index_type> accum;
+    if(_count.size()>0){
+      accum.resize(_count.size());
+      accum[0] = _count[0];
+      for(int i=1; i<_count.size(); ++i){
+        accum[i] = accum[i-1]+_count[i];
+      }
+    }
+    return accum;
+  }
  protected:
   virtual void resize(value_type start, value_type end, value_type step) {
-    _buckets.reset(start, end, step);
-    _count.resize(_buckets.buckets());
+    _range.reset(start, end, step);
+    _count.resize(_range.buckets());
   }
   virtual value_type random_elem (int bucket) const
   {
-    const static float factor = _buckets.step()==1?0:0.5;//0.5;
-    return _buckets.bounded_minimum(bucket)+(value_type)(factor*_buckets.step());
+    const static float factor = _range.step()==1?0:0.5;//0.5;
+    return _range.bounded_minimum(bucket)+(value_type)(factor*_range.step());
   }
   index_type median(int count) const{
     if(!count) return (index_type)-1;
@@ -111,6 +153,31 @@ class Histogram{
   }
   virtual void del(int bucket, reference_type){
     --_count[bucket];
+  }
+  virtual void cut(int st,int ed){
+    int count = 0;
+    for(int i=0; i<st; ++i) count += _count[i];
+    _under_minimum_count += count;
+    _valid_count -= count;
+    count = 0;
+    for(int i=_count.size()-1; i>ed; --i) count += _count[i];
+    _beyond_maximum_count += count;
+    _valid_count -= count;
+
+    if(st==0){
+      if(ed!=_count.size()-1){
+        _count.resize(ed+1);
+        _range._unbounded_maximun = _range.unbounded_maximun(ed);
+        _range._buckets = _count.size();
+      }
+    }else{
+      for(int i=st; i<=ed; ++i)
+        _count[i-st] = _count[i];
+      if(ed!=_count.size()-1) _range._unbounded_maximun = _range.unbounded_maximun(ed);
+      _range._bounded_minimum = _range.bounded_minimum(st);
+      _count.resize(ed-st+1);
+      _range._buckets = _count.size();
+    }
   }
 };
 
@@ -127,7 +194,9 @@ class RefHistogram : public Histogram<T>
   std::vector< std::deque<store_type> > _origs;
  public:
   RefHistogram(value_type start = 0, value_type end = 256, value_type step = 1)
-      : base(start, end, step), _origs(base::buckets()){}
+      : base(start, end, step){
+    _origs.resize(base::range().buckets());
+  }
   void clear() override{
     for(auto& o : _origs)
       o.clear();
@@ -155,11 +224,10 @@ protected:
   }
   void resize(value_type start, value_type end, value_type step) override{
     base::resize(start, end, step);
-    _origs.resize(base::buckets());
+    _origs.resize(base::range().buckets());
   }
 };
 
-};
 };  // namespace raster
 };  // namespace xlingsky
 
