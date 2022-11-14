@@ -18,7 +18,7 @@ struct Range {
   value_type   	_bounded_minimum;
   value_type   	_unbounded_maximun;
   value_type 		_step;
-  int _buckets;
+  int _bins;
   Range(value_type start = 0, value_type end = 256, value_type step = 1){
     reset(start, end, step);
   }
@@ -26,15 +26,15 @@ struct Range {
     _bounded_minimum = start;
     _unbounded_maximun = end;
     _step = step;
-    _buckets = int((end-start)/step);
+    _bins = int((end-start)/step);
   }
-  int bucket(value_type v) const {
+  int bin(value_type v) const {
     return int((v-_bounded_minimum)/_step);
   }
-  int buckets() const { return _buckets; }
-  value_type bounded_minimum(int bucket = 0) const { return _bounded_minimum + bucket*_step; };
+  int bins() const { return _bins; }
+  value_type bounded_minimum(int bin = 0) const { return _bounded_minimum + bin*_step; };
   value_type unbounded_maximun() const { return _unbounded_maximun; };
-  value_type unbounded_maximun(int bucket) const { return bounded_minimum(bucket+1); };
+  value_type unbounded_maximun(int bin) const { return bounded_minimum(bin+1); };
   value_type step() const { return _step; }
 };
 
@@ -55,7 +55,7 @@ class Histogram{
  public:
   Histogram(value_type start = 0, value_type end = 256, value_type step = 1)
       : _range(start, end, step), _valid_count(0), _under_minimum_count(0), _beyond_maximum_count(0) {
-    _count.resize(_range.buckets(), 0);
+    _count.resize(_range.bins(), 0);
  }
   virtual void clear() {
     for(auto& c : _count)
@@ -70,16 +70,51 @@ class Histogram{
     int cut_lower_count = (int)(_valid_count*cut_lower);
     int cut_upper_count = (int)(_valid_count*cut_upper);
 
-    int st = 0, ed = _count.size()-1;
+    int st = 0, ed = (int)_count.size()-1;
     while((cut_lower_count-=_count[st])>=0) ++st;
     while((cut_upper_count-=_count[ed])>=0) --ed;
     cut(st, ed);
+  }
+  void redistribution(index_type cliplimit){
+    size_t excess = 0;
+    for(const auto& c : _count) {
+      long bin_excess = (long)c-(long)cliplimit;
+      if(bin_excess>0) excess += bin_excess;
+    }
+    if(excess==0) return;
+
+    size_t bin_increment = excess/_count.size();
+    size_t upper = cliplimit-bin_increment; /* Bins larger than upper set to cliplimit */
+
+    for(auto& c : _count){
+      if(c>cliplimit) c = cliplimit;
+      else if(c > upper){
+        excess -= (cliplimit-c);
+        c = cliplimit;
+      }else{
+        excess -= bin_increment;
+        c += bin_increment;
+      }
+    }
+
+    while(excess){ /* Redistribute remaining excess  */
+      for(int i=0; excess && i<_count.size(); ++i){
+        index_type step = _count.size()/excess;
+        if(step<1) step = 1;
+        for(int j=i; j < _count.size() && excess; j += step ){
+          if(_count[j]<cliplimit){
+            ++_count[j]; --excess;
+          }
+        }
+      }
+    }
+
   }
   void add(reference_type orig){
     if(*orig<_range.bounded_minimum()) ++_under_minimum_count;
     else if(*orig>=_range.unbounded_maximun()) ++_beyond_maximum_count;
     else{
-      add(_range.bucket(*orig), orig);
+      add(_range.bin(*orig), orig);
       ++_valid_count;
     }
   }
@@ -87,41 +122,41 @@ class Histogram{
     if(*orig<_range.bounded_minimum()) --_under_minimum_count;
     else if(*orig>=_range.unbounded_maximun()) --_beyond_maximum_count;
     else{
-      del(_range.bucket(*orig), orig);
+      del(_range.bin(*orig), orig);
       --_valid_count;
     }
   }
 #define BATCH_FUNCTION(name)                                            \
-  void name##s(reference_type src, int cols, int rows, int pixelspace, int linespace) { \
-  if(cols<=0 || rows<=0 ) return;                                       \
-  struct _##name{                                                       \
-    self* _p;                                                           \
-    _##name(self* p) : _p(p) {}                                         \
-    void operator()(const void* data){                                  \
-      _p->name((reference_type)data);                                 \
-    }                                                                   \
-  } op(this);                                                           \
-  xlingsky::raster::transform(src, cols, rows, pixelspace*sizeof(value_type), linespace*sizeof(value_type), op); \
+  void name##s(reference_type src, index_type cols, index_type rows, index_type pixelspace, index_type linespace) { \
+    if(cols<=0 || rows<=0 ) return;                                     \
+    struct _##name{                                                     \
+      self* _p;                                                         \
+      _##name(self* p) : _p(p) {}                                       \
+      void operator()(const void* data){                                \
+        _p->name((reference_type)data);                                 \
+      }                                                                 \
+    } op(this);                                                         \
+    xlingsky::raster::transform(src, cols, rows, pixelspace*sizeof(value_type), linespace*sizeof(value_type), op); \
   }
 
   BATCH_FUNCTION(add);
   BATCH_FUNCTION(del);
 
-  int bucket(value_type& v) const { return _range.bucket(v); }
+  int bin(value_type& v) const { return _range.bin(v); }
   const Range& range() const { return _range; }
-  index_type count(int bucket) const { return _count[bucket]; }
+  index_type count(int bin) const { return _count[bin]; }
   value_type median(value_type _default) const{
     index_type i = median(_valid_count);
     if(i==(index_type)-1) return _default;
     return random_elem(i);
   }
-  value_type value(int bucket) const {
-    return random_elem(bucket);
+  value_type value(int bin) const {
+    return random_elem(bin);
   }
   index_type under_minimum_count() const { return _under_minimum_count; }
   index_type beyond_maximum_count() const { return _beyond_maximum_count; }
-  std::vector<index_type> accumulation() const {
-    std::vector<index_type> accum;
+  std::vector<size_t> accumulation() const {
+    std::vector<size_t> accum;
     if(_count.size()>0){
       accum.resize(_count.size());
       accum[0] = _count[0];
@@ -134,12 +169,12 @@ class Histogram{
  protected:
   virtual void resize(value_type start, value_type end, value_type step) {
     _range.reset(start, end, step);
-    _count.resize(_range.buckets());
+    _count.resize(_range.bins());
   }
-  virtual value_type random_elem (int bucket) const
+  virtual value_type random_elem (int bin) const
   {
     const static float factor = _range.step()==1?0:0.5;//0.5;
-    return _range.bounded_minimum(bucket)+(value_type)(factor*_range.step());
+    return _range.bounded_minimum(bin)+(value_type)(factor*_range.step());
   }
   index_type median(int count) const{
     if(!count) return (index_type)-1;
@@ -148,11 +183,11 @@ class Histogram{
     while((count-=_count[i])>0) ++i;
     return i;
   }
-  virtual void add(int bucket, reference_type){
-    ++_count[bucket];
+  virtual void add(int bin, reference_type){
+    ++_count[bin];
   }
-  virtual void del(int bucket, reference_type){
-    --_count[bucket];
+  virtual void del(int bin, reference_type){
+    --_count[bin];
   }
   virtual void cut(int st,int ed){
     int count = 0;
@@ -160,7 +195,7 @@ class Histogram{
     _under_minimum_count += count;
     _valid_count -= count;
     count = 0;
-    for(int i=_count.size()-1; i>ed; --i) count += _count[i];
+    for(int i=(int)_count.size()-1; i>ed; --i) count += _count[i];
     _beyond_maximum_count += count;
     _valid_count -= count;
 
@@ -168,7 +203,7 @@ class Histogram{
       if(ed!=_count.size()-1){
         _count.resize(ed+1);
         _range._unbounded_maximun = _range.unbounded_maximun(ed);
-        _range._buckets = _count.size();
+        _range._bins = (int)_count.size();
       }
     }else{
       for(int i=st; i<=ed; ++i)
@@ -176,7 +211,7 @@ class Histogram{
       if(ed!=_count.size()-1) _range._unbounded_maximun = _range.unbounded_maximun(ed);
       _range._bounded_minimum = _range.bounded_minimum(st);
       _count.resize(ed-st+1);
-      _range._buckets = _count.size();
+      _range._bins = (int)_count.size();
     }
   }
 };
@@ -195,7 +230,7 @@ class RefHistogram : public Histogram<T>
  public:
   RefHistogram(value_type start = 0, value_type end = 256, value_type step = 1)
       : base(start, end, step){
-    _origs.resize(base::range().buckets());
+    _origs.resize(base::range().bins());
   }
   void clear() override{
     for(auto& o : _origs)
@@ -203,20 +238,20 @@ class RefHistogram : public Histogram<T>
     base::clear();
   }
 protected:
-  void add(int bucket, reference_type orig) override{
+  void add(int bin, reference_type orig) override{
     if(std::is_same<store_type, value_type>::value)
-      _origs[bucket].push_back(*orig);
+      _origs[bin].push_back(*orig);
     else
-      _origs[bucket].push_back(orig);
-    base::add(bucket, orig);
+      _origs[bin].push_back(orig);
+    base::add(bin, orig);
   }
-  void del(int bucket, reference_type orig) override{
-    _origs[bucket].pop_front();
-    base::del(bucket, orig);
+  void del(int bin, reference_type orig) override{
+    _origs[bin].pop_front();
+    base::del(bin, orig);
   }
-  value_type random_elem (int bucket) const override
+  value_type random_elem (int bin) const override
   {
-    auto& o = _origs[bucket];
+    auto& o = _origs[bin];
     if(std::is_same<store_type, value_type>::value)
       return o[rand()%o.size()];
     else
@@ -224,7 +259,7 @@ protected:
   }
   void resize(value_type start, value_type end, value_type step) override{
     base::resize(start, end, step);
-    _origs.resize(base::range().buckets());
+    _origs.resize(base::range().bins());
   }
 };
 

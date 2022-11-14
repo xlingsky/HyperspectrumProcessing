@@ -5,6 +5,7 @@
 #include <opencv2/imgproc.hpp>
 #include "raster/detail/despeckle.hpp"
 #include "raster/detail/lookup.hpp"
+#include "TileManager.hpp"
 
 namespace xlingsky{
 namespace raster{
@@ -209,7 +210,6 @@ class Render : public FrameIterator {
  public:
   typedef float SrcType;
   typedef SrcType DstType;
-  typedef xlingsky::raster::Histogram<SrcType> HistType;
   enum Mode{
     MINMAX = 0x01,
     CLIP = 0x02,
@@ -217,77 +217,45 @@ class Render : public FrameIterator {
     GLOBAL = 0x08
   };
  protected:
-  SrcType _src_minimum;
-  SrcType _src_unbounded_maximum;
-  DstType _dst_minimum;
-  DstType _dst_maximum;
   int _mode;
 
-  SrcType _src_step;
   int _hist_col_step;
   int _hist_row_step;
-  float _cut_ratio_upper;
-  float _cut_ratio_lower;
+  float _hist_clip_ratio;
 
+  xlingsky::raster::detail::LookupCreator<SrcType, DstType> _lookup_creator;
   xlingsky::raster::detail::Lookup<SrcType, DstType>* _lookup;
 
  public:
   Render(SrcType src_min, SrcType src_umax, DstType dst_min, DstType dst_umax, int mode = MINMAX|CLIP)
-      :  _src_minimum(src_min), _src_unbounded_maximum(src_umax),
-         _dst_minimum(dst_min), _dst_maximum(dst_umax),
+      :  _lookup_creator(src_min, src_umax, dst_min, dst_umax),
          _mode(mode), _lookup(nullptr),
-         _src_step(1), _hist_col_step(3), _hist_row_step(3), _cut_ratio_upper(0.002), _cut_ratio_lower(0.002) {}
+         _hist_col_step(3), _hist_row_step(3), _hist_clip_ratio(80){}
   virtual ~Render(){
     if(_lookup) delete _lookup;
   }
   void set_src_step(SrcType step) {
-    _src_step = step;
+    _lookup_creator.set_src_step(step);
+  }
+  void set_cut_ratio(float lower, float upper){
+    _lookup_creator.set_cut_ratio(lower, upper);
   }
   void set_hist_interval(int col, int row){
     _hist_col_step = col;
     _hist_row_step = row;
   }
-  void set_clip_ratio(float lower, float upper){
-    _cut_ratio_lower = lower;
-    _cut_ratio_upper = upper;
+  void set_hist_clip_ratio(float ratio){
+    _hist_clip_ratio = ratio;
   }
   bool operator()(int , int , int , void* data, int cols,
       int rows) override {
     if(_lookup==nullptr){
-      if((_mode&CLIP) || (_mode&HIST_EQU)){
-        HistType hist(_src_minimum, _src_unbounded_maximum, _src_step);
-        hist.adds((const SrcType*)data, MAX(1, cols/_hist_col_step), MAX(1, rows/_hist_row_step), _hist_col_step, cols*_hist_row_step);
-        if(_mode&CLIP) hist.cut(_cut_ratio_lower, _cut_ratio_upper);
-        if(_mode&HIST_EQU){
-          std::vector<DstType> table;
-          {
-            auto accum = hist.accumulation();
-            auto minimum = accum.front();
-            auto maximum = accum.back();
-            DstType a = 0;
-            if(maximum-minimum>std::numeric_limits<SrcType>::epsilon())
-              a = (_dst_maximum-_dst_minimum)/(maximum-minimum);
-            xlingsky::raster::detail::LookupLinear<SrcType, DstType> p(a, (DstType)(_dst_minimum-a*minimum));
-            table.resize(accum.size());
-            for(int i=0; i<accum.size(); ++i)
-              table[i] = p[accum[i]];
-          }
-          xlingsky::raster::detail::LookupMap<SrcType, DstType>* p = new xlingsky::raster::detail::LookupMap<SrcType, DstType>();
-          p->set_buckets(_src_minimum, _src_unbounded_maximum, _src_step);
-          p->set_table(table.begin(), table.end());
-          _lookup = p;
-        }else{
-          SrcType minimum = hist.value(0);
-          SrcType maximum = hist.value(hist.range().buckets()-1);
-          DstType a = 0;
-          if(maximum-minimum>std::numeric_limits<SrcType>::epsilon())
-            a = (_dst_maximum-_dst_minimum)/(maximum-minimum);
-          _lookup = new xlingsky::raster::detail::LookupLinear<SrcType, DstType>(a,_dst_minimum-a*minimum);
-        }
+      if(_mode&HIST_EQU){
+        _lookup = _lookup_creator.Create((const SrcType*)data, MAX(1, cols/_hist_col_step), MAX(1, rows/_hist_row_step), _hist_col_step, cols*_hist_row_step, _hist_clip_ratio);
+      }else if(_mode&CLIP){
+        _lookup = _lookup_creator.Create((const SrcType*)data, MAX(1, cols/_hist_col_step), MAX(1, rows/_hist_row_step), _hist_col_step, cols*_hist_row_step);
       }else{
-        assert((_src_unbounded_maximum-_src_minimum)>std::numeric_limits<SrcType>::epsilon());
-        auto a = (_dst_maximum-_dst_minimum)/(_src_unbounded_maximum-_src_minimum);
-        _lookup = new xlingsky::raster::detail::LookupLinear<SrcType, DstType>(a,_dst_minimum-a*_src_minimum);
+        _lookup = _lookup_creator.Create();
       }
     }
 
@@ -302,11 +270,140 @@ class Render : public FrameIterator {
 };
 
 class Clahe : public FrameIterator {
+ protected:
+  typedef float SrcType;
+  typedef SrcType DstType;
+  using SegContainer = xlingsky::TileManager::SegContainer;
+  typedef xlingsky::raster::detail::Lookup<SrcType, DstType>* LookupPtr;
+  unsigned int _tile_col;
+  unsigned int _tile_row;
+  int _hist_col_step;
+  int _hist_row_step;
+  float _hist_clip_ratio;
+  xlingsky::raster::detail::LookupCreator<SrcType, DstType> _lookup_creator;
+  std::vector< LookupPtr > _tile_lookup;
+  SegContainer _tile_colseg;
+  SegContainer _tile_rowseg;
+
+  int _mode;
+ protected:
+  void ClearLookup(){
+    for(auto& p : _tile_lookup){
+      delete p;
+      p = nullptr;
+    }
+    _tile_lookup.clear();
+  }
+  void Interpolate(SrcType* data, int pixelspace, int linespace, LookupPtr plu, LookupPtr pru, LookupPtr plb, LookupPtr prb, unsigned int cols, unsigned int rows){
+    unsigned int num = cols*rows;
+    for(int coef_y=0, coef_invy=rows; coef_y < rows; ++coef_y, --coef_invy, data+=linespace){
+      SrcType* pr = data;
+      for(int coef_x=0, coef_invx=cols; coef_x < cols; ++coef_x, --coef_invx, pr += pixelspace){
+        *pr = (SrcType)((coef_invy*(coef_invx*(*plu)[*pr]+coef_x*(*pru)[*pr])+coef_y*(coef_invx*(*plb)[*pr]+coef_x*(*prb)[*pr]))/num);
+      }
+    }
+  }
  public:
-  Clahe() {}
-  virtual ~Clahe(){}
-  bool operator()(int b, int xoff, int yoff, void* data, int cols,
-      int rows) override {
+  Clahe(
+      SrcType src_min, SrcType src_umax, DstType dst_min, DstType dst_umax,
+      unsigned int tile_col, unsigned int tile_row, float clipratio, int mode)
+      : _lookup_creator(src_min, src_umax, dst_min, dst_umax), _tile_col(tile_col), _tile_row(tile_row), _hist_clip_ratio(clipratio), _mode(mode) {
+    _hist_col_step = tile_col/16;
+    if(_hist_col_step<1) _hist_col_step = 1;
+    _hist_row_step = tile_row/16;
+    if(_hist_row_step<1) _hist_row_step = 1;
+  }
+  virtual ~Clahe(){
+    ClearLookup();
+  }
+  void set_src_step(SrcType step) {
+    _lookup_creator.set_src_step(step);
+  }
+  void set_cut_ratio(float lower, float upper){
+    _lookup_creator.set_cut_ratio(lower, upper);
+  }
+  void set_hist_interval(int col, int row){
+    _hist_col_step = col;
+    _hist_row_step = row;
+  }
+  void set_hist_clip_ratio(float ratio){
+    _hist_clip_ratio = ratio;
+  }
+  bool operator()(int , int , int , void* data, int cols, int rows) override {
+
+    if(_tile_lookup.size()==0){
+      _tile_colseg = TileManager::Tiling(cols, _tile_col, 0, _tile_col);
+      _tile_rowseg = TileManager::Tiling(rows, _tile_row, 0, _tile_row);
+      _tile_lookup.resize(_tile_colseg.size()*_tile_rowseg.size());
+
+#ifdef _USE_OPENMP
+#pragma omp parallel for
+#endif
+      for (int r = 0; r < _tile_rowseg.size(); ++r) {
+        auto& tr = _tile_rowseg[r];
+        auto p = _tile_lookup.data()+r*_tile_colseg.size();
+        if(_hist_clip_ratio>0){
+          for (int c = 0; c < _tile_colseg.size(); ++c) {
+            auto& tc = _tile_colseg[c];
+            p[c] = _lookup_creator.Create(
+                (const SrcType*)data + tr.first*cols+tc.first,
+                MAX(1, tc.second/_hist_col_step), MAX(1, tr.second/_hist_row_step),
+                _hist_col_step, cols*_hist_row_step, _hist_clip_ratio);
+          }
+        }else{
+          for (int c = 0; c < _tile_colseg.size(); ++c) {
+            auto& tc = _tile_colseg[c];
+            p[c] = _lookup_creator.Create(
+                (const SrcType*)data + tr.first*cols+tc.first,
+                MAX(1, tc.second/_hist_col_step), MAX(1, tr.second/_hist_row_step),
+                _hist_col_step, cols*_hist_row_step);
+          }
+        }
+      }
+    }
+
+#ifdef _USE_OPENMP
+#pragma omp parallel for
+#endif
+    for(int r=0; r<=_tile_rowseg.size(); ++r){//
+      SrcType* pdata = (SrcType*)data;
+      unsigned int sub_y, upper_y, bottom_y;
+      if(r==0){
+        sub_y = _tile_rowseg[r].second >> 1;
+        upper_y = bottom_y = 0;
+      }else if(r==_tile_rowseg.size()){
+        sub_y = (_tile_rowseg[r-1].second+1) >> 1;
+        upper_y = bottom_y = r-1;
+        pdata += (_tile_rowseg[r-1].first+(_tile_rowseg[r-1].second>>1))*cols;
+      }else{
+        sub_y = ((_tile_rowseg[r-1].second+1)>>1)+(_tile_rowseg[r].second>> 1);
+        upper_y = r-1; bottom_y = r;
+        pdata += (_tile_rowseg[r-1].first+(_tile_rowseg[r-1].second>>1))*cols;
+      }
+      for(int c=0; c<=_tile_colseg.size(); ++c){
+        unsigned int sub_x, left_x, right_x;
+        if(c==0){
+          sub_x = _tile_colseg[c].second >> 1;
+          left_x = right_x = 0;
+        }else if(c==_tile_colseg.size()){
+          sub_x = (_tile_colseg[c-1].second+1) >> 1;
+          left_x = right_x = c-1;
+        }else{
+          sub_x = ((_tile_colseg[c-1].second+1)>>1) +(_tile_colseg[c].second>>1);
+          left_x = c-1; right_x = c;
+        }
+        auto plu = _tile_lookup[upper_y*_tile_colseg.size()+left_x];
+        auto pru = _tile_lookup[upper_y*_tile_colseg.size()+right_x];
+        auto plb = _tile_lookup[bottom_y*_tile_colseg.size()+left_x];
+        auto prb = _tile_lookup[bottom_y*_tile_colseg.size()+right_x];
+        Interpolate(pdata, 1, cols, plu, pru, plb, prb, sub_x, sub_y);
+        pdata += sub_x;
+      }
+    }
+
+    if(_mode){
+      ClearLookup();
+    }
     return true;
   }
 };

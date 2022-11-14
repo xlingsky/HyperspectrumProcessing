@@ -33,7 +33,7 @@ DEFINE_int32(c, 0, "compression type: 0=LOSSLESS, 1=LOSS8, 2=LOSS4, 3=NONE");
 DEFINE_string(gcp, "", "pos to add gcp to tif");
 DEFINE_string(nodata, "", "specify the nodata value.");
 DEFINE_int32(fc, 1, "flush cache mode: 0, 1, 2");
-DEFINE_string(ot, "", "output data type {Byte/Int16/UInt16/UInt32/Int32/UInt64/Int64/Float32/Float64/CInt16/CInt32/CFloat32/CFloat64}");
+DEFINE_string(ot, "", "output data type {Byte/Int16/UInt16/UInt32/Int32/Float32/Float64/CInt16/CInt32/CFloat32/CFloat64}");
 
 bool IsRaw(boost::filesystem::path& file){
   std::string ext;
@@ -501,7 +501,7 @@ int main(int argc, char* argv[]){
               float dst_min = v.second.get<float>("dst_min", 0);
               float dst_max = v.second.get<float>("dst_max", 255);
               if(FLAGS_ot.empty()){
-                if(dst_max<(int)std::numeric_limits<unsigned char>::max()+1)
+                if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
                   FLAGS_ot = "byte";
               }
               std::string m = v.second.get<std::string>("mode", "MINMAX|CLIP");
@@ -527,8 +527,35 @@ int main(int argc, char* argv[]){
                 op->set_hist_interval(hist_col_step, hist_row_step);
                 float cut_ratio_lower = v.second.get<float>("cut_lower", 0.002);
                 float cut_ratio_upper = v.second.get<float>("cut_upper", 0.002);
-                op->set_clip_ratio(cut_ratio_lower, cut_ratio_upper);
+                op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+                float hist_clip = v.second.get<float>("hist_clip", 80);
+                op->set_hist_clip_ratio(hist_clip);
               }
+
+              ops->Add(op);
+              boutput = 1;
+            }else if(name=="clahe"){
+              float src_min = v.second.get<float>("src_min", 7);
+              float src_umax = v.second.get<float>("src_umax", 4000);
+              float dst_min = v.second.get<float>("dst_min", 0);
+              float dst_max = v.second.get<float>("dst_max", 255);
+              unsigned int tile_col_num = v.second.get<unsigned int>("tile_col_num", 4);
+              unsigned int tile_row_num = v.second.get<unsigned int>("tile_row_num", 4);
+              float hist_clip = v.second.get<float>("hist_clip", 10);
+              float src_step = v.second.get<float>("src_step", 2);
+              int hist_col_step = v.second.get<float>("hist_col_step", -1);
+              int hist_row_step = v.second.get<float>("hist_row_step", -1);
+              float cut_ratio_lower = v.second.get<float>("cut_lower", 0);
+              float cut_ratio_upper = v.second.get<float>("cut_upper", 0);
+              int mode = v.second.get<int>("mode", 1);
+              if(FLAGS_ot.empty()){
+                if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
+                  FLAGS_ot = "byte";
+              }
+              xlingsky::raster::enhancement::Clahe* op = new xlingsky::raster::enhancement::Clahe(src_min, src_umax, dst_min, dst_max, MAX(buffer_size[store_prior[0]]/tile_col_num, 3), MAX(buffer_size[store_prior[1]]/tile_row_num, 3), hist_clip, mode);
+              op->set_src_step(src_step);
+              op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+              if(hist_col_step>0 && hist_row_step>0) op->set_hist_interval(hist_col_step, hist_row_step);
 
               ops->Add(op);
               boutput = 1;
@@ -555,8 +582,8 @@ int main(int argc, char* argv[]){
           GDALDataType datatype =src->GetRasterBand(1)->GetRasterDataType();
           {
             if(!FLAGS_ot.empty()){
-              const char* tag_name[] = {"byte", "uint16", "int16", "uint32", "int32", "uint64", "int64", "float32", "float64", "cint16", "cint32", "cfloat32", "cfloat64"};
-              GDALDataType tag_type[] = {GDT_Byte, GDT_UInt16, GDT_Int16, GDT_UInt32, GDT_Int32, GDT_UInt64, GDT_Int64, GDT_Float32, GDT_Float64, GDT_CInt16, GDT_CInt32, GDT_CFloat32, GDT_CFloat64};
+              const char* tag_name[] = {"byte", "uint16", "int16", "uint32", "int32", "float32", "float64", "cint16", "cint32", "cfloat32", "cfloat64"};
+              GDALDataType tag_type[] = {GDT_Byte, GDT_UInt16, GDT_Int16, GDT_UInt32, GDT_Int32, GDT_Float32, GDT_Float64, GDT_CInt16, GDT_CInt32, GDT_CFloat32, GDT_CFloat64};
               std::transform(FLAGS_ot.begin(), FLAGS_ot.end(), FLAGS_ot.begin(),
                              [](unsigned char c){ return std::tolower(c); });
               for(int i=0; i<sizeof(tag_name)/sizeof(tag_name[0]); ++i)
@@ -655,7 +682,7 @@ int main(int argc, char* argv[]){
     HSP::Header::SetCompression((HSP::Header::CompressionType)FLAGS_c);
 
     HSP::Decode decode( FLAGS_w, FLAGS_b, FLAGS_v);
-    decode.add_token(token, token+4);
+    decode.add_token(token, token+token_length);
 
     if(verbose){
       std::cout << "[DECODE] Total to-decoded raw data number= " << rawlist.size() << std::endl;
