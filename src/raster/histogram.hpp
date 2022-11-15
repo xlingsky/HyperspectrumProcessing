@@ -71,8 +71,8 @@ class Histogram{
     int cut_upper_count = (int)(_valid_count*cut_upper);
 
     int st = 0, ed = (int)_count.size()-1;
-    while((cut_lower_count-=_count[st])>=0) ++st;
-    while((cut_upper_count-=_count[ed])>=0) --ed;
+    while( st<_count.size() && (cut_lower_count-=_count[st])>=0) ++st;
+    while(ed>=0 && (cut_upper_count-=_count[ed])>=0) --ed;
     cut(st, ed);
   }
   void redistribution(index_type cliplimit){
@@ -190,6 +190,7 @@ class Histogram{
     --_count[bin];
   }
   virtual void cut(int st,int ed){
+    if (st > ed) return;
     int count = 0;
     for(int i=0; i<st; ++i) count += _count[i];
     _under_minimum_count += count;

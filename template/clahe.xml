@@ -1,12 +1,10 @@
 <HSP>
 <dim_prior>0,1,2</dim_prior>
 <task name="clahe">
-  <src_min>0</src_min>
+  <src_min>1</src_min>
   <src_umax>4000</src_umax>
   <dst_min>0</dst_min>
   <dst_max>255</dst_max>
-  <tile_col_num>5</tile_col_num>
-  <tile_row_num>2</tile_row_num>
-  <hist_clip>3</hist_clip>
+  <hist_clip>4</hist_clip>
 </task>
 </HSP>

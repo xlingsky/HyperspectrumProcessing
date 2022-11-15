@@ -539,8 +539,8 @@ int main(int argc, char* argv[]){
               float src_umax = v.second.get<float>("src_umax", 4000);
               float dst_min = v.second.get<float>("dst_min", 0);
               float dst_max = v.second.get<float>("dst_max", 255);
-              unsigned int tile_col_num = v.second.get<unsigned int>("tile_col_num", 4);
-              unsigned int tile_row_num = v.second.get<unsigned int>("tile_row_num", 4);
+              unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 512);
+              unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 512);
               float hist_clip = v.second.get<float>("hist_clip", 10);
               float src_step = v.second.get<float>("src_step", 2);
               int hist_col_step = v.second.get<float>("hist_col_step", -1);
@@ -552,7 +552,7 @@ int main(int argc, char* argv[]){
                 if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
                   FLAGS_ot = "byte";
               }
-              xlingsky::raster::enhancement::Clahe* op = new xlingsky::raster::enhancement::Clahe(src_min, src_umax, dst_min, dst_max, MAX(buffer_size[store_prior[0]]/tile_col_num, 3), MAX(buffer_size[store_prior[1]]/tile_row_num, 3), hist_clip, mode);
+              xlingsky::raster::enhancement::Clahe* op = new xlingsky::raster::enhancement::Clahe(src_min, src_umax, dst_min, dst_max, MAX(tile_cols, 3), MAX(tile_rows, 3), hist_clip, mode);
               op->set_src_step(src_step);
               op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
               if(hist_col_step>0 && hist_row_step>0) op->set_hist_interval(hist_col_step, hist_row_step);
