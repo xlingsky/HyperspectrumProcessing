@@ -547,7 +547,26 @@ int main(int argc, char* argv[]){
               int hist_row_step = v.second.get<float>("hist_row_step", -1);
               float cut_ratio_lower = v.second.get<float>("cut_lower", 0);
               float cut_ratio_upper = v.second.get<float>("cut_upper", 0);
-              int mode = v.second.get<int>("mode", 1);
+
+              float dst_mean = v.second.get<float>("dst_mean", 127);
+              float dst_std = v.second.get<float>("dst_std", 0);//40-70
+              if(dst_std<=0) dst_std = 70.0*tile_cols/512;
+              float c = v.second.get<float>("c", 0.7);//0-1
+              float b = v.second.get<float>("b", 0.7);//0-1
+
+              std::string m = v.second.get<std::string>("mode", "clahe");
+              std::transform(m.begin(), m.end(), m.begin(),
+                             [](unsigned char c){ return std::tolower(c); });
+              int mode = 0;
+              if(m.find("minmax")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Clahe::MINMAX;
+              if(m.find("wallis")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Clahe::WALLIS;
+              if(m.find("clahe")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Clahe::CLAHE;
+              if(m.find("global")!=std::string::npos)
+                mode |= xlingsky::raster::enhancement::Clahe::GLOBAL;
+
               if(FLAGS_ot.empty()){
                 if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
                   FLAGS_ot = "byte";
@@ -556,6 +575,7 @@ int main(int argc, char* argv[]){
               op->set_src_step(src_step);
               op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
               if(hist_col_step>0 && hist_row_step>0) op->set_hist_interval(hist_col_step, hist_row_step);
+              op->set_wallis_pars(dst_mean, dst_std, c, b);
 
               ops->Add(op);
               boutput = 1;

@@ -6,5 +6,6 @@
   <dst_min>0</dst_min>
   <dst_max>255</dst_max>
   <hist_clip>4</hist_clip>
+  <mode>WALLIS</mode>
 </task>
 </HSP>

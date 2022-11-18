@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <limits>
+#include <cmath>
 #include "raster/histogram.hpp"
 
 namespace xlingsky{
@@ -111,6 +112,8 @@ class LookupCreator{
     _cut_ratio_lower = lower;
     _cut_ratio_upper = upper;
   }
+  SrcType src_minimum() const { return _src_minimum; }
+  SrcType src_unbounded_maximum() const { return _src_unbounded_maximum; }
   LookupLinear<SrcType, DstType>* Create() const {
     return Create(_src_minimum, _src_unbounded_maximum, _dst_minimum, _dst_maximum);
   }
@@ -142,6 +145,56 @@ class LookupCreator{
     }
     LookupMap<SrcType, DstType>* p = new LookupMap<SrcType, DstType>();
     p->set_domain(hist.range().bounded_minimum(), hist.range().unbounded_maximun(), hist.range().step());
+    p->set_table(table.begin(), table.end());
+    return p;
+  }
+  LookupMap<SrcType, DstType>* Create(const SrcType* data, IndexType cols, IndexType rows, IndexType pixelspace, IndexType linespace, float dst_mean, float dst_std, float factor_contrast, float factor_bright) const{
+    typedef Range<SrcType> RangeType;
+    RangeType range(_src_minimum, _src_unbounded_maximum, _src_step);
+    struct _op{
+      RangeType& _range;
+      float _mean;
+      float _std;
+      SrcType _min;
+      SrcType _max;
+      IndexType _count;
+      _op(RangeType& range) : _range(range), _mean(0), _std(0), _count(0) {
+        _min = _range.unbounded_maximun();
+        _max = _range.bounded_minimum();
+      }
+      void operator()(const void* data){
+        const SrcType* pdata = (const SrcType*)data;
+        if(*pdata < _range.bounded_minimum()) return;
+        if(*pdata >= _range.unbounded_maximun()) return;
+        _mean += (float)*pdata;
+        _std += (float)*pdata**pdata;
+        if(*pdata<_min) _min = *pdata;
+        else if(*pdata>_max) _max = *pdata;
+        ++_count;
+      }
+      void process(){
+        if(_count==0) return;
+        _mean /= _count;
+        _std = _std/_count-_mean*_mean;
+        if(_std<0) _std = 0;
+        else _std = std::sqrt(_std);
+        if(_min<_max) _range.reset(_min, _max, _range.step());
+      }
+    } op(range);
+    xlingsky::raster::transform(data, cols, rows, pixelspace*sizeof(SrcType), linespace*sizeof(SrcType), op);
+    op.process();
+
+    float r1 = (factor_contrast*dst_std)/(factor_contrast*op._std+dst_std/factor_contrast);
+    float r0 = factor_bright*dst_mean+(1-factor_bright-r1)*op._mean;
+
+    std::vector<DstType> table;
+    {
+      table.resize(range.bins());
+      for(int i=0; i<range.bins(); ++i)
+        table[i] = r1*range.random(i)+r0;
+    }
+    LookupMap<SrcType, DstType>* p = new LookupMap<SrcType, DstType>();
+    p->set_domain(range.bounded_minimum(), range.unbounded_maximun(), range.step());
     p->set_table(table.begin(), table.end());
     return p;
   }

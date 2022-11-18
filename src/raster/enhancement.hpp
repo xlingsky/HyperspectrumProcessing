@@ -196,16 +196,6 @@ class Despeckle : public FrameIterator {
   }
 };
 
-class Wallis: public FrameIterator {
- public:
-  Wallis() {}
-  virtual ~Wallis(){}
-  bool operator()(int , int , int , void* data, int cols,
-      int rows) override {
-    return true;
-  }
-};
-
 class Render : public FrameIterator {
  public:
   typedef float SrcType;
@@ -270,6 +260,13 @@ class Render : public FrameIterator {
 };
 
 class Clahe : public FrameIterator {
+ public:
+  enum Mode{
+    MINMAX = 0x01,
+    WALLIS = 0x02,
+    CLAHE = 0x04,
+    GLOBAL = 0x08
+  };
  protected:
   typedef float SrcType;
   typedef SrcType DstType;
@@ -285,6 +282,11 @@ class Clahe : public FrameIterator {
   SegContainer _tile_colseg;
   SegContainer _tile_rowseg;
 
+  float _dst_mean;
+  float _dst_std;
+  float _c;
+  float _b;
+
   int _mode;
  protected:
   void ClearLookup(){
@@ -299,6 +301,8 @@ class Clahe : public FrameIterator {
     for(int coef_y=0, coef_invy=rows; coef_y < rows; ++coef_y, --coef_invy, data+=linespace){
       SrcType* pr = data;
       for(int coef_x=0, coef_invx=cols; coef_x < cols; ++coef_x, --coef_invx, pr += pixelspace){
+        if(*pr < _lookup_creator.src_minimum() ) continue;
+        if(*pr >= _lookup_creator.src_unbounded_maximum()) continue;
         *pr = (SrcType)((coef_invy*(coef_invx*(*plu)[*pr]+coef_x*(*pru)[*pr])+coef_y*(coef_invx*(*plb)[*pr]+coef_x*(*prb)[*pr]))/num);
       }
     }
@@ -307,7 +311,7 @@ class Clahe : public FrameIterator {
   Clahe(
       SrcType src_min, SrcType src_umax, DstType dst_min, DstType dst_umax,
       unsigned int tile_col, unsigned int tile_row, float clipratio, int mode)
-      : _lookup_creator(src_min, src_umax, dst_min, dst_umax), _tile_col(tile_col), _tile_row(tile_row), _hist_clip_ratio(clipratio), _mode(mode) {
+      : _lookup_creator(src_min, src_umax, dst_min, dst_umax), _tile_col(tile_col), _tile_row(tile_row), _hist_clip_ratio(clipratio), _mode(mode), _dst_std(0), _dst_mean(0), _c(-1), _b(-1) {
     _hist_col_step = tile_col/16;
     if(_hist_col_step<1) _hist_col_step = 1;
     _hist_row_step = tile_row/16;
@@ -329,6 +333,12 @@ class Clahe : public FrameIterator {
   void set_hist_clip_ratio(float ratio){
     _hist_clip_ratio = ratio;
   }
+  void set_wallis_pars(float dst_mean, float dst_std, float c, float b){
+    _dst_mean = dst_mean;
+    _dst_std = dst_std;
+    _c = c;
+    _b = b;
+  }
   bool operator()(int , int , int , void* data, int cols, int rows) override {
 
     if(_tile_lookup.size()==0){
@@ -342,7 +352,7 @@ class Clahe : public FrameIterator {
       for (int r = 0; r < _tile_rowseg.size(); ++r) {
         auto& tr = _tile_rowseg[r];
         auto p = _tile_lookup.data()+r*_tile_colseg.size();
-        if(_hist_clip_ratio>0){
+        if(_mode&CLAHE){
           for (int c = 0; c < _tile_colseg.size(); ++c) {
             auto& tc = _tile_colseg[c];
             p[c] = _lookup_creator.Create(
@@ -350,7 +360,15 @@ class Clahe : public FrameIterator {
                 MAX(1, tc.second/_hist_col_step), MAX(1, tr.second/_hist_row_step),
                 _hist_col_step, cols*_hist_row_step, _hist_clip_ratio);
           }
-        }else{
+        }else if(_mode&WALLIS){
+          for (int c = 0; c < _tile_colseg.size(); ++c) {
+            auto& tc = _tile_colseg[c];
+            p[c] = _lookup_creator.Create(
+                (const SrcType*)data + tr.first*cols+tc.first,
+                MAX(1, tc.second/_hist_col_step), MAX(1, tr.second/_hist_row_step),
+                _hist_col_step, cols*_hist_row_step, _dst_mean, _dst_std, _c, _b);
+          }
+        }else {
           for (int c = 0; c < _tile_colseg.size(); ++c) {
             auto& tc = _tile_colseg[c];
             p[c] = _lookup_creator.Create(
@@ -401,7 +419,7 @@ class Clahe : public FrameIterator {
       }
     }
 
-    if(_mode){
+    if(!(_mode&GLOBAL)){
       ClearLookup();
     }
     return true;

@@ -36,6 +36,10 @@ struct Range {
   value_type unbounded_maximun() const { return _unbounded_maximun; };
   value_type unbounded_maximun(int bin) const { return bounded_minimum(bin+1); };
   value_type step() const { return _step; }
+  value_type random(int bin) const{
+    const static float factor = _step==1?0:0.5;//0.5;
+    return bounded_minimum(bin)+(value_type)(factor*_step);
+  }
 };
 
 template <typename T>
@@ -173,8 +177,7 @@ class Histogram{
   }
   virtual value_type random_elem (int bin) const
   {
-    const static float factor = _range.step()==1?0:0.5;//0.5;
-    return _range.bounded_minimum(bin)+(value_type)(factor*_range.step());
+    return _range.random(bin);
   }
   index_type median(int count) const{
     if(!count) return (index_type)-1;
