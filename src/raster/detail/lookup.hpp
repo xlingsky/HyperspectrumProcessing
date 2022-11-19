@@ -184,6 +184,7 @@ class LookupCreator{
     xlingsky::raster::transform(data, cols, rows, pixelspace*sizeof(SrcType), linespace*sizeof(SrcType), op);
     op.process();
 
+    //if(op._std<=0) return nullptr;
     float r1 = (factor_contrast*dst_std)/(factor_contrast*op._std+dst_std/factor_contrast);
     float r0 = factor_bright*dst_mean+(1-factor_bright-r1)*op._mean;
 

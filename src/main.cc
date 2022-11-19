@@ -551,8 +551,8 @@ int main(int argc, char* argv[]){
               float dst_mean = v.second.get<float>("dst_mean", 127);
               float dst_std = v.second.get<float>("dst_std", 0);//40-70
               if(dst_std<=0) dst_std = 70.0*tile_cols/512;
-              float c = v.second.get<float>("c", 0.7);//0-1
-              float b = v.second.get<float>("b", 0.7);//0-1
+              float c = v.second.get<float>("c", 0.8);//0-1
+              float b = v.second.get<float>("b", 0.9);//0-1
 
               std::string m = v.second.get<std::string>("mode", "clahe");
               std::transform(m.begin(), m.end(), m.begin(),
