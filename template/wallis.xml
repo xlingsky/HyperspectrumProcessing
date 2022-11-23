@@ -1,0 +1,18 @@
+<HSP>
+<dim_prior>0,1,2</dim_prior>
+<task name="render">
+  <src_min>1</src_min>
+  <src_umax>4000</src_umax>
+  <dst_min>0</dst_min>
+  <dst_max>255</dst_max>
+  <dst_mean>127</dst_mean>
+  <dst_std>70</dst_std>
+  <resample_col_step>2</resample_col_step>
+  <resample_row_step>2</resample_row_step>
+  <tile_cols>512</tile_cols>
+  <tile_rows>512</tile_rows>
+	<cut_lower>0</cut_lower>
+	<cut_upper>0</cut_upper>
+  <mode>clip|wallis|tile</mode>
+</task>
+</HSP>

@@ -80,6 +80,28 @@ class Histogram{
     cut(st, ed);
   }
   void redistribution(index_type cliplimit){
+    int clipped = 0;
+    for (auto& c : _count) {
+      if (c > cliplimit) {
+        clipped += c - cliplimit;
+        c = cliplimit;
+      }
+    }
+
+    // redistribute clipped pixels
+    int redistBatch = clipped / _count.size();
+    int residual = clipped - redistBatch * _count.size();
+
+    for (auto& c : _count) c += redistBatch;
+
+    if (residual != 0) {
+      int residualStep = MAX(_count.size() / residual, 1);
+      for (int i = 0; i < _count.size() && residual > 0;
+           i += residualStep, residual--)
+        _count[i]++;
+    }
+    return;
+
     size_t excess = 0;
     for(const auto& c : _count) {
       long bin_excess = (long)c-(long)cliplimit;

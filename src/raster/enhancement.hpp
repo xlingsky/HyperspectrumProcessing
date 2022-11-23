@@ -226,6 +226,10 @@ class Render : public FrameIterator {
       delete _lookup_creator;
   }
   void set_lut_creator(LutCreatorPtr lookup_creator){
+    if (_lookup_creator) {
+      delete _lookup_creator;
+      _lookup_creator = nullptr;
+    }
     _lookup_creator = lookup_creator;
   }
   void set_resample_interval(int col, int row){

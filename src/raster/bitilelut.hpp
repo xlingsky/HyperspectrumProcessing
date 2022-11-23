@@ -275,6 +275,10 @@ public:
     }
   }
   void set_lut_creator(LutCreatorPtr lookup_creator){
+    if (_lookup_creator) {
+      delete _lookup_creator;
+      _lookup_creator = nullptr;
+    }
     _lookup_creator = lookup_creator;
   }
   void set_resample_interval(int col, int row){
@@ -321,6 +325,8 @@ public:
         upper_y = r-1; bottom_y = r;
         pdata += (_tile_rowseg[r-1].first+(_tile_rowseg[r-1].second>>1))*cols;
       }
+      upper_y *= _tile_colseg.size();
+      bottom_y *= _tile_colseg.size();
       for(int c=0; c<=_tile_colseg.size(); ++c){
         unsigned int sub_x, left_x, right_x;
         if(c==0){
@@ -333,7 +339,9 @@ public:
           sub_x = ((_tile_colseg[c-1].second+1)>>1) +(_tile_colseg[c].second>>1);
           left_x = c-1; right_x = c;
         }
-        LookupPtr p[4] = {_tile_lookup[upper_y*_tile_colseg.size()+left_x], _tile_lookup[upper_y*_tile_colseg.size()+right_x], _tile_lookup[bottom_y*_tile_colseg.size()+left_x], _tile_lookup[bottom_y*_tile_colseg.size()+right_x]};
+        LookupPtr p[4] = {
+            _tile_lookup[upper_y + left_x], _tile_lookup[upper_y + right_x],
+            _tile_lookup[bottom_y + left_x], _tile_lookup[bottom_y + right_x]};
         for(int i=1; i<4; ++i){
           if(p[i]==nullptr){
             p[i] = p[i-1];

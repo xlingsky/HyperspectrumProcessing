@@ -2,13 +2,16 @@
 <dim_prior>0,1,2</dim_prior>
 <task name="render">
   <src_min>0</src_min>
-  <src_umax>4000</src_umax>
+  <src_umax>256</src_umax>
   <dst_min>0</dst_min>
   <dst_max>255</dst_max>
   <resample_col_step>1</resample_col_step>
   <resample_row_step>1</resample_row_step>
-  <tile_cols>25</tile_cols>
-  <tile_rows>25</tile_rows>
+  <grid_x>8</grid_x>
+  <grid_y>8</grid_y>
+	<hist_clip>2</hist_clip>
+	<cut_lower>-1</cut_lower>
+	<cut_upper>-1</cut_upper>
   <mode>clip|hist|tile</mode>
 </task>
 </HSP>

@@ -554,8 +554,26 @@ int main(int argc, char* argv[]){
               int resample_col_step = v.second.get<float>("resample_col_step", 3);
               int resample_row_step = v.second.get<float>("resample_row_step", 3);
               if(mode&0x40){
-                unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 512);
-                unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 512);
+                unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 0);
+                unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 0);
+                unsigned int grid_x = v.second.get<unsigned int>("grid_x", 8);
+                unsigned int grid_y = v.second.get<unsigned int>("grid_y", 8);
+                if (tile_cols == 0) {
+                  if (grid_x == 0)
+                    tile_cols = 512;
+                  else {
+                    tile_cols = buffer_size[store_prior[0]] / grid_x;
+                    if (tile_cols < 1) tile_cols = 1;
+                  }
+                }
+                if (tile_rows == 0) {
+                  if (grid_y == 0)
+                    tile_rows = 512;
+                  else {
+                    tile_rows = buffer_size[store_prior[1]] / grid_y;
+                    if (tile_rows < 1) tile_rows = 1;
+                  }
+                }
                 xlingsky::raster::BiTileLut* op =
                     new xlingsky::raster::BiTileLut( tile_cols, tile_rows, (mode&0x80)?xlingsky::raster::BiTileLut::GLOBAL:xlingsky::raster::BiTileLut::NONE);
                 op->set_lut_creator(lut);
