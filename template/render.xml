@@ -5,8 +5,8 @@
   <src_umax>4000</src_umax>
   <dst_min>0</dst_min>
   <dst_max>255</dst_max>
-  <hist_col_step>5</hist_col_step>
-  <hist_row_step>5</hist_row_step>
+  <resample_col_step>5</resample_col_step>
+  <resample_row_step>5</resample_row_step>
   <mode>minmax|clip|hist</mode>
 </task>
 </HSP>

@@ -159,6 +159,8 @@ class Histogram{
   }
   index_type under_minimum_count() const { return _under_minimum_count; }
   index_type beyond_maximum_count() const { return _beyond_maximum_count; }
+  index_type valid_count() const { return _valid_count; }
+
   std::vector<size_t> accumulation() const {
     std::vector<size_t> accum;
     if(_count.size()>0){

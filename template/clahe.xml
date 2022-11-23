@@ -1,12 +1,14 @@
 <HSP>
 <dim_prior>0,1,2</dim_prior>
-<task name="clahe">
-  <src_min>1</src_min>
+<task name="render">
+  <src_min>0</src_min>
   <src_umax>4000</src_umax>
-  <src_step>1</src_step>
   <dst_min>0</dst_min>
   <dst_max>255</dst_max>
-  <hist_clip>4</hist_clip>
-  <mode>WALLIS</mode>
+  <resample_col_step>1</resample_col_step>
+  <resample_row_step>1</resample_row_step>
+  <tile_cols>25</tile_cols>
+  <tile_rows>25</tile_rows>
+  <mode>clip|hist|tile</mode>
 </task>
 </HSP>

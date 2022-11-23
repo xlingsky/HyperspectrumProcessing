@@ -504,80 +504,70 @@ int main(int argc, char* argv[]){
                 if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
                   FLAGS_ot = "byte";
               }
-              std::string m = v.second.get<std::string>("mode", "MINMAX|CLIP");
+              std::string m = v.second.get<std::string>("mode", "WALLIS|MINMAX|CUT|TILE");
               std::transform(m.begin(), m.end(), m.begin(),
                              [](unsigned char c){ return std::tolower(c); });
               int mode = 0;
               if(m.find("minmax")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Render::MINMAX;
-              if(m.find("clip")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Render::CLIP;
+                mode |= 0x01;
+              if(m.find("cut")!=std::string::npos)
+                mode |= 0x02;
               if(m.find("hist")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Render::HIST_EQU;
-              if(m.find("global")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Render::GLOBAL;
-              xlingsky::raster::enhancement::Render* op =
-                  new xlingsky::raster::enhancement::Render(src_min, src_umax, dst_min, dst_max, mode);
-              if ((mode & xlingsky::raster::enhancement::Render::CLIP) ||
-                  (mode & xlingsky::raster::enhancement::Render::HIST_EQU)) {
-                float src_step = v.second.get<float>("src_step", 1);
-                int hist_col_step = v.second.get<float>("hist_col_step", 3);
-                int hist_row_step = v.second.get<float>("hist_row_step", 3);
-                op->set_src_step(src_step);
-                op->set_hist_interval(hist_col_step, hist_row_step);
-                float cut_ratio_lower = v.second.get<float>("cut_lower", 0.002);
-                float cut_ratio_upper = v.second.get<float>("cut_upper", 0.002);
-                op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
-                float hist_clip = v.second.get<float>("hist_clip", 80);
-                op->set_hist_clip_ratio(hist_clip);
-              }
-
-              ops->Add(op);
-              boutput = 1;
-            }else if(name=="clahe"){
-              float src_min = v.second.get<float>("src_min", 7);
-              float src_umax = v.second.get<float>("src_umax", 4000);
-              float dst_min = v.second.get<float>("dst_min", 0);
-              float dst_max = v.second.get<float>("dst_max", 255);
-              unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 512);
-              unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 512);
-              float hist_clip = v.second.get<float>("hist_clip", 10);
-              float src_step = v.second.get<float>("src_step", 2);
-              int hist_col_step = v.second.get<float>("hist_col_step", -1);
-              int hist_row_step = v.second.get<float>("hist_row_step", -1);
-              float cut_ratio_lower = v.second.get<float>("cut_lower", 0);
-              float cut_ratio_upper = v.second.get<float>("cut_upper", 0);
-
-              float dst_mean = v.second.get<float>("dst_mean", 127);
-              float dst_std = v.second.get<float>("dst_std", 0);//40-70
-              if(dst_std<=0) dst_std = 70.0*tile_cols/512;
-              float c = v.second.get<float>("c", 0.8);//0-1
-              float b = v.second.get<float>("b", 0.9);//0-1
-
-              std::string m = v.second.get<std::string>("mode", "clahe");
-              std::transform(m.begin(), m.end(), m.begin(),
-                             [](unsigned char c){ return std::tolower(c); });
-              int mode = 0;
-              if(m.find("minmax")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Clahe::MINMAX;
+                mode |= 0x04;
               if(m.find("wallis")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Clahe::WALLIS;
-              if(m.find("clahe")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Clahe::CLAHE;
+                mode |= 0x08;
+              if(m.find("tile")!=std::string::npos)
+                mode |= 0x40;
               if(m.find("global")!=std::string::npos)
-                mode |= xlingsky::raster::enhancement::Clahe::GLOBAL;
+                mode |= 0x80;
 
-              if(FLAGS_ot.empty()){
-                if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
-                  FLAGS_ot = "byte";
+              xlingsky::raster::LutCreator* lut = nullptr;
+              if ((mode & 0x02) || (mode & 0x04) || (mode & 0x08)) {
+                float src_step = v.second.get<float>("src_step", 1);
+                if(mode&0x08){
+                  float dst_mean = v.second.get<float>("dst_mean", 127);
+                  float dst_std = v.second.get<float>("dst_std", 70);//40-70
+                  float c = v.second.get<float>("c", 0.8);//0-1
+                  float b = v.second.get<float>("b", 0.9);//0-1
+                  xlingsky::raster::LutWallis* l = new xlingsky::raster::LutWallis(src_step, src_min, src_umax, dst_min, dst_max);
+                  l->Setup(dst_mean, dst_std, c, b);
+                  lut = l;
+                }else{
+                  float cut_ratio_lower = v.second.get<float>("cut_lower", 0.002);
+                  float cut_ratio_upper = v.second.get<float>("cut_upper", 0.002);
+                  if(mode&0x02){
+                    xlingsky::raster::LutLinear* l = new xlingsky::raster::LutLinear(src_step, src_min, src_umax, dst_min, dst_max);
+                    l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+                    lut = l;
+                  }else{
+                    float hist_clip = v.second.get<float>("hist_clip", 10);
+                    xlingsky::raster::LutClahe* l = new xlingsky::raster::LutClahe(hist_clip,src_step, src_min, src_umax, dst_min, dst_max);
+                    l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+                    lut = l;
+                  }
+                }
+              }else{
+                xlingsky::raster::LutCreator* l = new xlingsky::raster::LutCreator(src_min, src_umax, dst_min, dst_max);
+                lut = l;
               }
-              xlingsky::raster::enhancement::Clahe* op = new xlingsky::raster::enhancement::Clahe(src_min, src_umax, dst_min, dst_max, MAX(tile_cols, 3), MAX(tile_rows, 3), hist_clip, mode);
-              op->set_src_step(src_step);
-              op->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
-              if(hist_col_step>0 && hist_row_step>0) op->set_hist_interval(hist_col_step, hist_row_step);
-              op->set_wallis_pars(dst_mean, dst_std, c, b);
 
-              ops->Add(op);
+              int resample_col_step = v.second.get<float>("resample_col_step", 3);
+              int resample_row_step = v.second.get<float>("resample_row_step", 3);
+              if(mode&0x40){
+                unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 512);
+                unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 512);
+                xlingsky::raster::BiTileLut* op =
+                    new xlingsky::raster::BiTileLut( tile_cols, tile_rows, (mode&0x80)?xlingsky::raster::BiTileLut::GLOBAL:xlingsky::raster::BiTileLut::NONE);
+                op->set_lut_creator(lut);
+                op->set_resample_interval(resample_col_step, resample_row_step);
+                ops->Add(op);
+              }else{
+                xlingsky::raster::enhancement::Render* op =
+                    new xlingsky::raster::enhancement::Render((mode&0x80)?xlingsky::raster::enhancement::Render::GLOBAL:xlingsky::raster::enhancement::Render::NONE);
+                op->set_lut_creator(lut);
+                op->set_resample_interval(resample_col_step, resample_row_step);
+                ops->Add(op);
+              }
               boutput = 1;
             }
         }
