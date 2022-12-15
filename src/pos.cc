@@ -557,7 +557,7 @@ void LinescanModel::test(){
 //    auto cam = CameraMatrix(107);
     Eigen::Vector3d X;
 
-    X << 101.8514647,	38.50230176,	2046.9854;
+    X << 101.974001   , 38.62077165, 1901.7;//101.8514647,	38.50230176,	2046.9854;
 
     _pos->Cvt_BLH2Local(X.data());
 

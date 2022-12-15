@@ -656,7 +656,12 @@ int main(int argc, char* argv[]){
         HSP::Pos pos;
         pos.load(FLAGS_gcp.c_str());
         HSP::PinholeCamera cam;
-        cam.Load("G:\\jincang\\camera_vnir.txt");
+        cam.SetFocalLength(59750/30.0);
+        cam.SetPrincipalPoint(-724,0);
+        double a[3] = {0,0,0};
+        cam.SetAngles(a);
+        double t[3] = {0.006, 0.25768, -0.6773 };
+        cam.SetTranslation(t);
         HSP::LinescanModel model;
         model.SetCamera(&cam);
         model.SetPos(&pos);
