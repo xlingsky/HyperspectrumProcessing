@@ -660,7 +660,7 @@ int main(int argc, char* argv[]){
         cam.SetPrincipalPoint(-724,0);
         double a[3] = {0,0,0};
         cam.SetAngles(a);
-        double t[3] = {0.006, 0.25768, -0.6773 };
+        double t[3] = {0.006, 0.25768, -0.6773 };
         cam.SetTranslation(t);
         HSP::LinescanModel model;
         model.SetCamera(&cam);
