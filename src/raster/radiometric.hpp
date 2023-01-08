@@ -12,6 +12,8 @@
 
 #include "raster/operator.h"
 #include "raster/detail/inpaint.hpp"
+#include "raster/gdalex.hpp"
+#include "raster/gdal_traits.hpp"
 
 //#define DEBUG
 
@@ -85,6 +87,23 @@ void Tile(int width, int height, int tilesize, int margin, TileOp& op) {
 
 template <typename T>
 bool load(const char* filepath, size_t count, T* data) {
+  const char* ext = (const char*)strrchr(filepath, '.');
+  if(ext && GetGDALDescription(ext) ){
+    GDALDataset* dataset = (GDALDataset*)GDALOpen(filepath, GA_ReadOnly);
+    if((size_t)dataset->GetRasterXSize()*dataset->GetRasterYSize() < count){
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "Factors NOT enough " << filepath;
+#endif
+      GDALClose(dataset);
+    return false;
+    }
+    int cols = dataset->GetRasterXSize();
+    int rows = count/cols;
+    if( dataset->RasterIO(GF_Read, 0, 0, cols, rows, data, cols, rows, gdal::DataType<T>::type(), 1, nullptr, 0, 0, 0) ){
+    }
+    GDALClose(dataset);
+    return true;
+  }
   FILE* fp = fopen(filepath, "r");
   if (fp == nullptr) {
 #ifdef _LOGGING
