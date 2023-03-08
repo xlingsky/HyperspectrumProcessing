@@ -8,7 +8,8 @@ inline char* strlwr( char *str ){
   for( ;*str!='\0';str++ ){ if ( *str>='A' && *str<='Z' ) *str = *str+d; }
   return orig;
 }
-inline const char* GetGDALDescription(const char* lpstrExt)
+
+inline const char* GetGDALDescription(const char* lpstrExt, const char* default_ret)
 {
   static const char* strExt[] = { "tif", "tiff", "bmp", "jpg", "png", "img", "bt", "ecw", "fits", "gif", "hdf", "hdr","pix", "dat"};
   static const char* strDescrip[] = { "GTiff","GTiff", "BMP", "JPEG","PNG", "HFA", "BT", "ECW", "FITS", "GIF", "HDF4", "EHdr","PCIDSK", "ENVI" };
@@ -21,7 +22,23 @@ inline const char* GetGDALDescription(const char* lpstrExt)
       return strDescrip[i];
     }
   }
-  return nullptr;
+  return default_ret;
+}
+
+inline bool IsRasterDataset(const char* filepath){
+  FILE* fp = fopen(filepath,"r");
+  if (fp==nullptr) return false;
+  fclose(fp);
+  char path[512];
+  strcpy(path,filepath);
+  char* p = strrchr(path, '.');
+  if( p && GetGDALDescription(p+1, nullptr) ) return true;
+  if(p==nullptr) p = path+strlen(path);
+  strcpy(p,".hdr");
+  fp = fopen(path, "r");
+  if(fp==nullptr) return false;
+  fclose(fp);
+  return true;
 }
 
 inline GDALDataset* GDALCreate(const char* filepath, int cols, int rows, int bands, GDALDataType type){
@@ -29,7 +46,7 @@ inline GDALDataset* GDALCreate(const char* filepath, int cols, int rows, int ban
   const char* ext = strrchr(filepath,'.');
   if(ext==nullptr) ext = "tif";
   GDALDriver *poDriver;
-  poDriver = GetGDALDriverManager()->GetDriverByName(GetGDALDescription(ext));
+  poDriver = GetGDALDriverManager()->GetDriverByName(GetGDALDescription(ext,"ENVI"));
   dataset = poDriver->Create(filepath, cols, rows, bands, type, nullptr);
   return dataset;
 }

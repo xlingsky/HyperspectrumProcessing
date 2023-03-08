@@ -180,8 +180,8 @@ bool Splice(PathIterator first, PathIterator last, const char* dstpath){
     data.resize((size_t)src->GetRasterXSize()*src->GetRasterYSize()*src->GetRasterCount());
     if(src->RasterIO(GF_Read, 0, 0, src->GetRasterXSize(), src->GetRasterYSize(), data.data(), src->GetRasterXSize(), src->GetRasterYSize(), type, src->GetRasterCount(), nullptr, 0, 0, 0)==CE_None && dst->RasterIO(GF_Write, 0, rowid, src->GetRasterXSize(), src->GetRasterYSize(), data.data(), src->GetRasterXSize(), src->GetRasterYSize(), type, src->GetRasterCount(), nullptr, 0, 0, 0) == CE_None){
     }
-    GDALClose(src);
     rowid += src->GetRasterYSize();
+    GDALClose(src);
 
     if(fp){
       file.replace_extension(".aux");
@@ -218,7 +218,7 @@ int main(int argc, char* argv[]){
             "[task]: " + name + " -task <task xml file> <image file>\n";
   }
   gflags::SetUsageMessage(usage);
-  gflags::SetVersionString("2.0");
+  gflags::SetVersionString("2.3");
 
   google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -277,6 +277,7 @@ int main(int argc, char* argv[]){
 				store_prior[2] = std::stoi(result[2]);
 			}
         }
+        std::vector<std::string> post_tasks;
 
         BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("HSP")) {
             if (v.first != "task") continue;
@@ -293,15 +294,47 @@ int main(int argc, char* argv[]){
                 ops->Add(op);
                 boutput = 1;
             }
-            else if (name == "badpixel") {
+            else if (name == "dpc") {
                 std::string b = v.second.get<std::string>("file");
-                xlingsky::raster::radiometric::BadPixelCorrection* op = new xlingsky::raster::radiometric::BadPixelCorrection(buffer_size[store_prior[0]],buffer_size[store_prior[1]]);
-                if (!op->load( adaptor.absolutepath(b).string().c_str())) {
-                    std::cout << "ERROR:badpixel file not loaded a and b" << std::endl;
+                xlingsky::raster::radiometric::DefectivePixelCorrection* op = nullptr;
+                xlingsky::raster::radiometric::DefectivePixelCorrectionV2* p1 = new xlingsky::raster::radiometric::DefectivePixelCorrectionV2;
+                if( p1->load(adaptor.absolutepath(b).string().c_str(), dst_cols, dst_rows, dst_bands)){
+                  op = p1;
+                }else {
+                  delete p1;
+                  xlingsky::raster::radiometric::DefectivePixelCorrectionV1* p2 = new xlingsky::raster::radiometric::DefectivePixelCorrectionV1;
+                  int pt[3];
+                  {
+                    std::string prior = v.second.get<std::string>("dim_prior", "");
+                    std::vector<std::string> result;
+                    boost::split(result, prior, boost::is_any_of(","));
+                    if (result.size() == 3) {
+                      pt[0] = std::stoi(result[0]);
+                      pt[1] = std::stoi(result[1]);
+                      pt[2] = std::stoi(result[2]);
+                    }else{
+                      memcpy(pt, store_prior, sizeof(int)*3);
+                    }
+                  }
+                  if(!p2->load(adaptor.absolutepath(b).string().c_str(), buffer_size[pt[0]], buffer_size[pt[1]], pt[2])){
+                    delete p2;
+                    std::cout << "ERROR:dpc file not loaded!" << std::endl;
                     return 1;
+                  }
+                  op = p2;
                 }
                 ops->Add(op);
                 boutput = 1;
+            }
+            else if (name == "extend"){
+              xlingsky::raster::common::Extend* op = new xlingsky::raster::common::Extend();
+              std::string b = v.second.get<std::string>("file");
+              if (!op->load(adaptor.absolutepath(b).string().c_str(), buffer_size[store_prior[0]], buffer_size[store_prior[1]])) {
+                std::cout << "ERROR:extend file not loaded " << std::endl;
+                return 1;
+              }
+              ops->Add(op);
+              boutput = 1;
             }
             else if (name == "gauss") {
                 int band = v.second.get<int>("band");
@@ -376,6 +409,10 @@ int main(int argc, char* argv[]){
               }
               if(nodata_success) op->SetNoDataValue(nodata);
               ops->Add(op);
+            }else if(name == "sort"){
+              xlingsky::raster::common::Sort* op = new xlingsky::raster::common::Sort();
+              ops->Add(op);
+              boutput = 1;
             }
             else if (name == "nuc"){
               float cut_ratio_dark = v.second.get<float>("cut_dark", 0.03);
@@ -439,6 +476,16 @@ int main(int argc, char* argv[]){
               op->SetFilePath(apath, bpath, bppath, xmlpath, hipath, lopath);
               op->SetDimOrder(store_prior);
               ops->Add(op);
+
+              bool apply = v.second.get<bool>("apply", true);
+              if(apply && xmlpath[0])
+              {
+                std::string cmd(argv[0]);
+                cmd = cmd + " -task " + xmlpath + " " + path.string();
+                if(!FLAGS_o.empty())
+                  cmd += " -o " + FLAGS_o;
+                post_tasks.push_back(cmd);
+              }
             }
             else if (name == "interp") {
               std::vector<double> wl_old, wl_new;
@@ -651,6 +698,13 @@ int main(int argc, char* argv[]){
             GDALClose(dst);
         }
         GDALClose(src);
+
+        if(post_tasks.size() > 0){
+          for(auto& cmd : post_tasks){
+            VLOG(1) << "CALL: " << cmd;
+            system(cmd.c_str());
+          }
+        }
         return 0;
     } else if (!FLAGS_gcp.empty()) {
         HSP::Pos pos;
@@ -725,7 +779,7 @@ int main(int argc, char* argv[]){
     if(FLAGS_o.empty()){
     } else if(boost::filesystem::is_directory(FLAGS_o)) {
       dirpath = FLAGS_o;
-    }else if(boost::filesystem::extension(FLAGS_o).empty()){
+    }else if(boost::filesystem::path(FLAGS_o).extension().empty()){
       boost::filesystem::create_directories(FLAGS_o);
       dirpath = FLAGS_o;
     }else if(rawlist.size()>1){
@@ -802,13 +856,13 @@ int main(int argc, char* argv[]){
       }else if(boost::filesystem::is_directory(dirpath)){
         dstpath = dirpath;
         char name[512];
-        sprintf(name,"%s_splice_%d%s", srcpath.stem().string().c_str(), i, srcpath.extension().string().c_str() );
+        snprintf(name,512,"%s_splice_%d%s", srcpath.stem().string().c_str(), i, srcpath.extension().string().c_str() );
         dstpath /= name;
       }else {
         dstpath = dirpath;
         if(grps.size()>1){
           char post[512];
-          sprintf(post,"_%d%s", i, dstpath.extension().string().c_str());
+          snprintf(post,512,"_%d%s", i, dstpath.extension().string().c_str());
           dstpath.replace_extension();
           dstpath /= post;
         }

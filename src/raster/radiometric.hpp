@@ -5,7 +5,7 @@
 #include <vector>
 #include <sstream>
 #include <string>
-#include <boost/filesystem.hpp>
+// #include <boost/filesystem.hpp>
 
 #include "TileManager.hpp"
 #include "InterpolatorAdaptor.hpp"
@@ -14,6 +14,7 @@
 #include "raster/detail/inpaint.hpp"
 #include "raster/gdalex.hpp"
 #include "raster/gdal_traits.hpp"
+#include "raster/common.hpp"
 
 //#define DEBUG
 
@@ -28,7 +29,7 @@
 #define _LOG_LEVEL_RADIOMETRIC 1
 #endif
 // #include <sstream>
-//#define BADPIXEL_COUNTING
+//#define DEFECTIVEPIXEL_COUNTING
 
 namespace xlingsky {
 
@@ -87,8 +88,7 @@ void Tile(int width, int height, int tilesize, int margin, TileOp& op) {
 
 template <typename T>
 bool load(const char* filepath, size_t count, T* data) {
-  const char* ext = (const char*)strrchr(filepath, '.');
-  if(ext && GetGDALDescription(ext) ){
+  if(IsRasterDataset(filepath) ){
     GDALDataset* dataset = (GDALDataset*)GDALOpen(filepath, GA_ReadOnly);
     if((size_t)dataset->GetRasterXSize()*dataset->GetRasterYSize() < count){
 #ifdef _LOGGING
@@ -114,7 +114,7 @@ bool load(const char* filepath, size_t count, T* data) {
   size_t i;
   for (i = 0; i < count; ++i) {
     double t;
-    if (fscanf(fp, "%lf", &t) != 1) break;
+    if (fscanf(fp, "%lf%*c", &t) != 1) break;
     data[i] = (T)t;
   }
 
@@ -159,14 +159,14 @@ class PixelCorrection : public FrameIterator {
   int _cols;
   int _rows;
   int _threshold;
-#ifdef BADPIXEL_COUNTING
+#ifdef DEFECTIVEPIXEL_COUNTING
   std::vector<std::vector<int> > _list;
 #endif
 
  public:
   PixelCorrection(int cols, int rows)
       : _cols(cols), _rows(rows),
-#ifdef BADPIXEL_COUNTING
+#ifdef DEFECTIVEPIXEL_COUNTING
     _list(rows),
 #endif
     _threshold(10) {}
@@ -180,7 +180,7 @@ class PixelCorrection : public FrameIterator {
 // omp_out.insert(omp_out.end(), omp_in.begin(), omp_in.end())) #pragma omp
 // parallel for reduction(merge: _list) #else #pragma omp parallel for
 // reduction(+: cnt) #endif #endif
-#ifndef BADPIXEL_COUNTING
+#ifndef DEFECTIVEPIXEL_COUNTING
 #ifdef _USE_OPENMP
 #pragma omp parallel for
 #endif
@@ -194,7 +194,7 @@ class PixelCorrection : public FrameIterator {
         DataType d = correct(b, pdata[i], i0+c);
         if (d < 0) {
           pdata[i] = 0;
-#ifdef BADPIXEL_COUNTING
+#ifdef DEFECTIVEPIXEL_COUNTING
           if (d < -_threshold) _list[b].push_back(i);
 #endif
         } else
@@ -206,7 +206,7 @@ class PixelCorrection : public FrameIterator {
   int cols() const { return _cols; }
   int rows() const { return _rows; }
     
-#ifdef BADPIXEL_COUNTING
+#ifdef DEFECTIVEPIXEL_COUNTING
   int max_bad_pixel_num() const {
     int cnt = 0;
     for (auto it = _list.begin(); it != _list.end(); ++it)
@@ -263,8 +263,8 @@ public:
             FILE* fp = fopen(index, "r");
             if(fp){
                 size_t cnt = 0;
-                char strline[512];
-                while(fgets(strline, 512, fp) && cnt<_bands){
+                char strline[1000000];
+                while(fgets(strline, 1000000, fp) && cnt<_bands){
                     size_t d;
                     if(sscanf(strline, "%ld",&d)==1){
                         _index[cnt++] = d;
@@ -309,53 +309,201 @@ class NonUniformCorrection : public PixelCorrection {
   DataType correct(int, DataType d, int i) override { return _a[i] * d + _b[i]; }
 };
 
-class BadPixelCorrection : public FrameIterator {
- protected:
-  cv::Mat _mask;
-
+class DefectivePixelCorrection : public Operator {
  public:
   typedef float DataType;
-  BadPixelCorrection(int cols, int rows)
-      : _mask(cv::Mat::zeros(rows, cols, CV_8U)) {}
-  bool load(const char* filepath) {
-    FILE* fp = fopen(filepath, "r");
-    if (fp == nullptr) return false;
-    char strline[512];
-    while (fgets(strline, 512, fp)) {
-      int r, c;
-      if (sscanf(strline, "%d%d", &r, &c) == 2) {
-        if (r > 0 && r <= _mask.rows && c > 0 && c <= _mask.cols)
-          _mask.at<unsigned char>(r - 1, c - 1) = 1;
-      }
-    }
-    return true;
-  }
-  bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override {
-    cv::Mat mask = _mask(cv::Rect(xoff, yoff, cols, rows));
+  typedef void* Mask;
+  DefectivePixelCorrection() {}
+  ~DefectivePixelCorrection(){}
 
-    cv::Mat m(rows, cols, cv::DataType<DataType>::type, data);
-    detail::InpaintOp op(m, m, mask);
+  virtual Mask init(int imoff[3], int size[3], int prior[3]) = 0;
+  virtual cv::Mat begin(int b, Mask mask) = 0;
+  virtual void end(int b, Mask mask) {}
+  virtual void exit(Mask mask) = 0;
+
+  bool operator()(void* data, int imoff[3], int size[3], int space[3],
+                  int prior[3]) override {
+
+    Mask mask = init(imoff, size, prior);
+    if(mask == nullptr) return false;
+
+    int rows = size[prior[1]];
+    int cols = size[prior[0]];
+
     xlingsky::TileManager manager;
     const int margin = 10;
-    const int tilesize = rows;
+    int tilesize = rows;
+    if(cols<tilesize) tilesize = cols;
+    if(500<tilesize) tilesize = 500;
     manager.AppendDimension(cols, tilesize, margin, margin);
     manager.AppendDimension(rows, tilesize, margin, margin);
+
+    for (int b = 0; b < size[prior[2]]; ++b){
+      cv::Mat m = begin(b, mask);
+      cv::Mat d( rows, cols, cv::DataType<DataType>::type, (char*)data+(size_t)space[prior[2]]*b);
+      detail::InpaintOp op(d, d, m);
 
 #ifdef _USE_OPENMP
 #pragma omp parallel for
 #endif
-    for (int r = 0; r < manager.Size(1); ++r) {
-      auto segr = manager.Segment(1, r);
-      int h = (r+1==manager.Size(1)?segr.second:tilesize);
-      for (int c = 0; c < manager.Size(0); ++c) {
-        auto segc = manager.Segment(0, c);
-        int w = (c+1==manager.Size(0)?segc.second:tilesize);
-        cv::Rect rc0(segc.first, segr.first, w, h),
-            rc1(segc.first, segr.first, segc.second, segr.second), rc2(0,0,w,h);
-        op(rc1, rc2, rc0);
+      for (int r = 0; r < manager.Size(1); ++r) {
+        auto segr = manager.Segment(1, r);
+        int h = (r+1==manager.Size(1)?segr.second:tilesize);
+        for (int c = 0; c < manager.Size(0); ++c) {
+          auto segc = manager.Segment(0, c);
+          int w = (c+1==manager.Size(0)?segc.second:tilesize);
+          cv::Rect rc0(segc.first, segr.first, w, h),
+              rc1(segc.first, segr.first, segc.second, segr.second), rc2(0,0,w,h);
+          op(rc1, rc2, rc0);
+        }
       }
+      end(b, mask);
     }
+    exit(mask);
+
     return true;
+  }
+};
+
+class DefectivePixelCorrectionV1 : public DefectivePixelCorrection{
+protected:
+  typedef float DataType;
+  struct MM{
+    cv::Mat m0;
+    int w;
+    int h;
+    bool flag;
+  };
+
+  std::vector<unsigned char> _data;
+  int _width;
+  int _height;
+  int _band_dim;
+ public:
+  DefectivePixelCorrectionV1() {}
+  ~DefectivePixelCorrectionV1(){}
+  // bool load(const char* filepath, int cols, int rows, int bands) {
+  //   int c[] = {cols, cols, rows};
+  //   int r[] = {rows, bands, bands};
+  //   int b[] = {2, 1, 0};
+  //   for(int i=0; i<3; ++i){
+  //     _data.resize((size_t)c[i]*r[i]);
+  //     if(xlingsky::raster::common::load(filepath, c[i], r[i], &_data[0])){
+  //       _width = c[i];
+  //       _height = r[i];
+  //       _band_dim = b[i];
+  //       return true;
+  //     }else if(xlingsky::raster::common::load(filepath, r[i], c[i], &_data[0])){
+  //       _width = r[i];
+  //       _height = c[i];
+  //       _band_dim = b[i];
+  //       return true;
+  //     }
+  //   }
+  //   return false;
+  // }
+  bool load(const char* filepath, int cols, int rows, int band_dim){
+    _data.resize((size_t)cols*rows);
+    if (xlingsky::raster::common::load(filepath, cols, rows, &_data[0])) {
+      _width = cols;
+      _height = rows;
+      _band_dim = band_dim;
+      return true;
+    }
+    return false;
+  }
+
+  Mask init(int imoff[3], int size[3], int prior[3]) override {
+    MM *mm = new MM;
+    cv::Mat t = cv::Mat( _height, _width, cv::DataType<unsigned char>::type,
+                    &_data[0]);
+    mm->w = size[prior[0]];
+    mm->h = size[prior[1]];
+    if(prior[2] == _band_dim) {
+      mm->flag = true;
+      mm->m0 = t(cv::Rect(imoff[prior[0]], imoff[prior[1]], size[prior[0]], size[prior[1]]));
+    }
+    else{
+      mm->flag = false;
+      mm->m0 = t(cv::Rect(imoff[prior[0]], imoff[prior[2]], size[prior[0]], size[prior[2]]));
+    }
+    return mm;
+  }
+  cv::Mat begin(int b, Mask mask) override{
+    MM* mm = (MM*)mask;
+    if(mm->flag){
+      return mm->m0;
+    }else{
+      cv::Mat m = cv::Mat(mm->h, mm->w, mm->m0.type(), mm->m0.ptr(b), 0);
+      m.step[0] = 0;
+      return m;
+    }
+  }
+  void exit(Mask mask) override{
+    MM* mm = (MM*)mask;
+    delete mm;
+  }
+};
+
+class DefectivePixelCorrectionV2 : public DefectivePixelCorrection {
+ protected:
+  struct MM{
+    unsigned char* data;
+    int space;
+    int cols;
+    int rows;
+  };
+  GDALDataset* _mask;
+
+ public:
+  typedef float DataType;
+  DefectivePixelCorrectionV2() : _mask(nullptr){
+  }
+  ~DefectivePixelCorrectionV2(){
+    if(_mask) GDALClose(_mask);
+  }
+  bool load(const char* maskpath, int cols, int rows, int bands){
+    if(!IsRasterDataset(maskpath)) return false;
+    GDALDataset* d = (GDALDataset*)GDALOpen(maskpath, GA_ReadOnly);
+    if(d==nullptr){
+      return false;
+    }
+    if(d->GetRasterXSize()<cols || d->GetRasterYSize()<rows || d->GetRasterCount()<bands){
+      return false;
+    }
+    if(_mask) GDALClose(_mask);
+    _mask = d;
+    return true;
+  }
+  Mask init(int imoff[3], int size[3], int prior[3]) override{
+    MM* mm = new MM;
+    mm->data = new unsigned char[(size_t)size[0]*size[1]*size[2]];
+    int mmspace[3];
+    mmspace[prior[0]] = sizeof(unsigned char);
+    mmspace[prior[1]] = mmspace[prior[0]]*size[prior[0]];
+    mmspace[prior[2]] = mmspace[prior[1]]*size[prior[1]];
+    std::vector<int> bandlist;
+    bandlist.resize(size[2]);
+    std::iota(bandlist.begin(), bandlist.end(), imoff[2]+1);
+    if(_mask->RasterIO(GF_Read, imoff[0], imoff[1], size[0], size[1], &mm->data[0], size[0], size[1], gdal::DataType<unsigned char>::type(), size[2], &bandlist[0], mmspace[0], mmspace[1], mmspace[2])!=CE_None){
+      delete[] mm->data;
+      delete mm;
+      return nullptr;
+    }
+    mm->space = mmspace[prior[2]];
+    mm->cols = size[prior[0]];
+    mm->rows = size[prior[1]];
+    return mm;
+  }
+  cv::Mat begin(int b, Mask mask) override{
+    MM* mm = (MM*)mask;
+    return cv::Mat( mm->rows, mm->cols, cv::DataType<unsigned char>::type,
+                    mm->data+b*mm->space);
+  }
+  void exit(Mask mask) override{
+    MM* mm = (MM*)mask;
+    if(mm->data) delete[] mm->data;
+    delete mm;
   }
 };
 
@@ -504,7 +652,7 @@ class NucCalculator : public FrameIterator{
   std::vector<double> _b;
   std::vector<double> _hi;
   std::vector<double> _lo;
-  std::vector<int> _badpixels;
+  std::vector<int> _defective_pixels;
   int _width;
 
   char _a_path[512];
@@ -536,7 +684,7 @@ class NucCalculator : public FrameIterator{
       VLOG(_LOG_LEVEL_RADIOMETRIC) << "Offset factor was saved to " << _b_path;
 #endif
     }
-    if(_bp_path[0] && ::xlingsky::raster::radiometric::save(_bp_path, _badpixels.data(), _badpixels.size(), _width)) {
+    if(_bp_path[0] && ::xlingsky::raster::radiometric::save(_bp_path, _defective_pixels.data(), _defective_pixels.size(), _width)) {
 #ifdef _LOGGING
       VLOG(_LOG_LEVEL_RADIOMETRIC) << "bad pixel list was saved to " << _bp_path;
 #endif
@@ -551,6 +699,11 @@ class NucCalculator : public FrameIterator{
         fprintf(fp, "\t\t<a>%s</a>\n", _a_path);
         fprintf(fp, "\t\t<b>%s</b>\n", _b_path);
         fprintf(fp, "\t</task>\n");
+        if(_bp_path[0] && _hi_path[0]){
+          fprintf(fp, "\t<task name=\"dpc\">\n");
+          fprintf(fp, "\t\t<file>%s</file>\n", _bp_path);
+          fprintf(fp, "\t</task>\n");
+        }
         fprintf(fp, "</HSP>\n");
         fclose(fp);
 #ifdef _LOGGING
@@ -701,12 +854,12 @@ class NucCalculator : public FrameIterator{
               case OFFSET:{
                 _a.push_back(1);
                 _b.push_back(v-sum.v_dark);
-                _badpixels.push_back(0);
+                _defective_pixels.push_back(0);
               }break;
               default:{
                 _a.push_back(v/sum.v_dark);
                 _b.push_back(0);
-                _badpixels.push_back(0);
+                _defective_pixels.push_back(0);
               };
             }
           }
@@ -714,7 +867,7 @@ class NucCalculator : public FrameIterator{
           for (int r = 0; r < tilesize; ++r) {
             _a.push_back(1);
             _b.push_back(0);
-            _badpixels.push_back(1);
+            _defective_pixels.push_back(1);
           }
         }
       }
@@ -793,13 +946,13 @@ class NucCalculator : public FrameIterator{
           auto tl = dn_low[r];
           _a.push_back((tu - tl) / (su - sl));
           _b.push_back(tl - _a.back() * sl);
-          _badpixels.push_back(0);
+          _defective_pixels.push_back(0);
           continue;
         }
       }
       _a.push_back(1);
       _b.push_back(0);
-      _badpixels.push_back(1);
+      _defective_pixels.push_back(1);
     }
     /*
     {
@@ -875,13 +1028,13 @@ class NucCalculator : public FrameIterator{
           auto tl = dn_low[r]/dn_w[r];
           _a.push_back((tu-tl)/(su-sl));
           _b.push_back(tl-_a.back()*sl);
-          _badpixels.push_back(0);
+          _DefectivePixels.push_back(0);
           continue;
         }
       }
       _a.push_back(1);
       _b.push_back(0);
-      _badpixels.push_back(1);
+      _DefectivePixels.push_back(1);
     }*/
 
     return true;

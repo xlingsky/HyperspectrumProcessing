@@ -1,6 +1,6 @@
 <HSP>
-<dim_prior>0,2,1</dim_prior>
-<task name="badpixel">
-<file></file>
+<dim_prior>0,1,2</dim_prior>
+<task name="dpc">
+  <file></file>
 </task>
 </HSP>
