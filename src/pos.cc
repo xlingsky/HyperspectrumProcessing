@@ -276,7 +276,7 @@ void Pos::Reprojection(){
     char* wkt_dst = nullptr;
     srcSRS.exportToWkt(&(wkt_src));
     dstSRS.exportToWkt(&(wkt_dst));
-    _reprojection = GDALCreateReprojectionTransformer(wkt_src,wkt_dst);
+    _reprojector = GDALCreateReprojectionTransformer(wkt_src,wkt_dst);
     if(wkt_src!=nullptr) CPLFree(wkt_src);
     if(wkt_dst!=nullptr) CPLFree(wkt_dst);
 #endif

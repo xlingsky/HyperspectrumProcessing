@@ -1667,7 +1667,8 @@ const RpcPara* Rpc::parameters()  const {
   return (const RpcPara*)rpc_->RpcInfo();
 }
 
-void xlingeo::RpcIntersection(const Rpc *rpcL, double pxl, double pyl,
+namespace xlingeo{
+void RpcIntersection(const Rpc *rpcL, double pxl, double pyl,
     const Rpc *rpcR, double pxr, double pyr,
                               double *lat, double *lon, double *alt, bool bAop6){
   if(bAop6){
@@ -1677,4 +1678,5 @@ void xlingeo::RpcIntersection(const Rpc *rpcL, double pxl, double pyl,
   _rpc_pxy_to_geoedtic(rpcL->parameters(), pxl, pyl,
                        rpcR->parameters(), pxr, pyr,
                        lat, lon, alt);
+}
 }

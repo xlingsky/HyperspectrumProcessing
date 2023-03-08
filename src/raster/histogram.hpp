@@ -47,12 +47,12 @@ class Histogram{
  public:
   typedef T value_type;
   typedef const T* reference_type;
-  typedef Range<T> Range;
+  typedef Range<T> range_type;
   typedef int index_type;
   typedef Histogram<T> self;
  protected:
   std::vector<index_type> _count;
-  Range _range;
+  range_type _range;
   index_type _valid_count;
   index_type _under_minimum_count;
   index_type _beyond_maximum_count;
@@ -169,7 +169,7 @@ class Histogram{
   BATCH_FUNCTION(del);
 
   int bin(value_type& v) const { return _range.bin(v); }
-  const Range& range() const { return _range; }
+  const range_type& range() const { return _range; }
   index_type count(int bin) const { return _count[bin]; }
   value_type median(value_type _default) const{
     index_type i = median(_valid_count);

@@ -3,6 +3,7 @@
 
 #include "kmp.hpp"
 #include <assert.h>
+#include <stddef.h>
 
 // #include <boost/multi_index_container.hpp>
 // #include <boost/multi_index/identity.hpp>
