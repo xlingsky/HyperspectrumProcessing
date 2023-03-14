@@ -66,7 +66,9 @@ class Processor {
     memcpy(_storeorder, order, sizeof(_storeorder));
   }
   void ReserveBufferSize(size_t size) {
-    _buffer.resize(size * GetDataTypeSize());
+    if(size==0) _buffer.clear();
+    else
+      _buffer.resize(size * GetDataTypeSize());
   }
   void SetDataType(GDALDataType datatype) { _datatype = datatype; }
   int GetDataTypeSize() const { return GDALGetDataTypeSizeBytes(_datatype); }

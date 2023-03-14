@@ -283,8 +283,14 @@ int main(int argc, char* argv[]){
             if (v.first != "task") continue;
             auto name = v.second.get_child("<xmlattr>.name").get_value<std::string>();
             if (name == "uniform") {
-                std::string a = v.second.get<std::string>("a");
-                std::string b = v.second.get<std::string>("b");
+              std::string a, b;
+              try{
+                a = v.second.get<std::string>("a");
+                b = v.second.get<std::string>("b");
+              }catch(const boost::property_tree::ptree_error& e){
+                std::cerr << e.what() << std::endl;
+                return 2;
+              }
                 xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(buffer_size[store_prior[0]],buffer_size[store_prior[1]]);
                 if (!op->load(adaptor.absolutepath(a).string().c_str(), adaptor.absolutepath(b).string().c_str())) {
                     std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
@@ -699,6 +705,7 @@ int main(int argc, char* argv[]){
         }
         GDALClose(src);
 
+        frame.ReserveBufferSize(0);
         if(post_tasks.size() > 0){
           for(auto& cmd : post_tasks){
             VLOG(1) << "CALL: " << cmd;
