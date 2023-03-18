@@ -8,8 +8,10 @@ find_package(GDAL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS  filesystem REQUIRED)
 find_package(glog REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
 INCLUDE_DIRECTORIES(${OpenCV_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES(${GDAL_INCLUDE_DIR})
+INCLUDE_DIRECTORIES(${EIGEN3_INCLUDE_DIR})
 INCLUDE_DIRECTORIES(src/)
 
 SET(OpenMP_LIBS "")
@@ -35,4 +37,4 @@ set(hsp
 
 add_executable(hsp ${hsp})
 
-target_link_libraries(hsp PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS})
+target_link_libraries(hsp PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS} )

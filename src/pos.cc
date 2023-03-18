@@ -11,7 +11,7 @@
 #include <ogr_srs_api.h>
 #include <vector>
 
-#include <eigen3/Eigen/Dense>
+#include <Eigen/Dense>
 
 #ifndef SRS_WKT_WGS84_LAT_LONG
 #define SRS_WKT_WGS84_LAT_LONG SRS_WKT_WGS84

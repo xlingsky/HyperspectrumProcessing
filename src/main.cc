@@ -17,8 +17,9 @@
 #include "decode/decode.h"
 #include "raster.hpp"
 #include "ipf.hpp"
-#include "pos.h"
 #include "bigfileio.h"
+
+#include "pos.h"
 
 DEFINE_string(file, "", "image list");
 DEFINE_string(o,"", "output directory");

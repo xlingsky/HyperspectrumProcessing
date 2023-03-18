@@ -3,8 +3,8 @@
 
 #include <vector>
 #include <map>
-#include <eigen3/Eigen/Geometry>
-#include <eigen3/Eigen/Dense>
+#include <Eigen/Geometry>
+#include <Eigen/Dense>
 
 namespace HSP{
 
