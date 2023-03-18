@@ -292,14 +292,14 @@ int main(int argc, char* argv[]){
         boost::split( vs, FLAGS_srcwin, boost::is_any_of(" ,;|"), boost::token_compress_on);
         for(int i=0; i<vs.size()-1; i+=2){
           int vt = std::stoi(vs[i]);
-          src_win[i] = std::max(vt, src_win[i]);
+          src_win[i] = (std::max)(vt, src_win[i]);
           if(src_win[i]>=src_win[i+1]) {
             LOG(ERROR) << "Source window size is zero";
             GDALClose(src);
             return 1;
           }
           vt = std::stoi(vs[i+1]);
-          if(vt>0) src_win[i+1] = std::min(vt, src_win[i+1]-src_win[i]);
+          if(vt>0) src_win[i+1] = (std::min)(vt, src_win[i+1]-src_win[i]);
           else if(vt<0) src_win[i+1] += vt-src_win[i];
         }
       }
@@ -352,8 +352,8 @@ int main(int argc, char* argv[]){
             std::cerr << e.what() << std::endl;
             return 2;
           }
-          float dst_min = v.second.get<float>("dst_min", std::numeric_limits<float>::min());
-          float dst_max = v.second.get<float>("dst_max", std::numeric_limits<float>::max());
+          float dst_min = v.second.get<float>("dst_min", (std::numeric_limits<float>::min)());
+          float dst_max = v.second.get<float>("dst_max", (std::numeric_limits<float>::max)());
           xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src_size[store_prior[0]],src_size[store_prior[1]], dst_min, dst_max);
           if (!op->load(adaptor.absolutepath(a).string().c_str(), adaptor.absolutepath(b).string().c_str())) {
             std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
@@ -432,8 +432,8 @@ int main(int argc, char* argv[]){
           std::string b = v.second.get<std::string>("b");
           std::string a = v.second.get<std::string>("a","");
           std::string index = v.second.get<std::string>("index","");
-          float dst_min = v.second.get<float>("dst_min", std::numeric_limits<float>::min());
-          float dst_max = v.second.get<float>("dst_max", std::numeric_limits<float>::max());
+          float dst_min = v.second.get<float>("dst_min", (std::numeric_limits<float>::min)());
+          float dst_max = v.second.get<float>("dst_max", (std::numeric_limits<float>::max)());
           xlingsky::raster::radiometric::PixelCorrection* op = nullptr;
           if(a.empty() || index.empty()){
             xlingsky::raster::radiometric::DarkBackgroundCorrection* p = new xlingsky::raster::radiometric::DarkBackgroundCorrection(src_size[store_prior[0]],src_size[store_prior[1]], dst_min, dst_max);
