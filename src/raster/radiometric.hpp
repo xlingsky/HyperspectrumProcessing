@@ -159,13 +159,15 @@ class PixelCorrection : public FrameIterator {
   int _cols;
   int _rows;
   int _threshold;
+  DataType _dst_minimum;
+  DataType _dst_maximum;
 #ifdef DEFECTIVEPIXEL_COUNTING
   std::vector<std::vector<int> > _list;
 #endif
 
  public:
-  PixelCorrection(int cols, int rows)
-      : _cols(cols), _rows(rows),
+  PixelCorrection(int cols, int rows, DataType dst_min, DataType dst_max)
+      : _cols(cols), _rows(rows), _dst_minimum(dst_min), _dst_maximum(dst_max),
 #ifdef DEFECTIVEPIXEL_COUNTING
     _list(rows),
 #endif
@@ -192,13 +194,14 @@ class PixelCorrection : public FrameIterator {
         size_t i = i1+c;
         if(IsNoData(pdata[i])) continue;
         DataType d = correct(b, pdata[i], i0+c);
-        if (d < 0) {
-          pdata[i] = 0;
+        if (d < _dst_minimum) {
+          pdata[i] = _dst_minimum;
 #ifdef DEFECTIVEPIXEL_COUNTING
           if (d < -_threshold) _list[b].push_back(i);
 #endif
-        } else
-          pdata[i] = d;
+        } else if(d>_dst_maximum){
+          d = _dst_maximum;
+        }else pdata[i] = d;
       }
     }
     return true;
@@ -225,9 +228,9 @@ class DarkBackgroundCorrection : public PixelCorrection {
   DataType* _data;
 
  public:
-  DarkBackgroundCorrection(int cols, int rows)
+  DarkBackgroundCorrection(int cols, int rows, DataType dst_min, DataType dst_max)
       : _data(new DataType[(size_t)cols * rows]),
-        PixelCorrection(cols, rows) {}
+        PixelCorrection(cols, rows, dst_min, dst_max) {}
   ~DarkBackgroundCorrection() {
     if (_data) delete[] _data;
   }
@@ -246,7 +249,7 @@ protected:
     size_t* _index;
     int _bands;
 public:
-    DarkBackgroundLinear(int cols, int rows, int bands) : PixelCorrection(cols, rows), _bands(bands){
+  DarkBackgroundLinear(int cols, int rows, int bands, DataType dst_min, DataType dst_max) : PixelCorrection(cols, rows, dst_min, dst_max), _bands(bands){
         size_t sz = (size_t)cols * rows;
         _a = new DataType[sz];
         _b = new DataType[sz];
@@ -290,8 +293,8 @@ class NonUniformCorrection : public PixelCorrection {
   DataType* _b;
 
  public:
-  NonUniformCorrection(int cols, int rows)
-      : PixelCorrection(cols, rows) {
+  NonUniformCorrection(int cols, int rows, DataType dst_min, DataType dst_max)
+      : PixelCorrection(cols, rows, dst_min, dst_max) {
     size_t sz = (size_t)cols * rows;
     _a = new DataType[sz];
     _b = new DataType[sz];
@@ -513,16 +516,27 @@ class MeanStdCalculator : public FrameIterator {
   std::vector<double> _std;
   int _width;
   char _filepath[512];
+  char _xmlpath[512];
+
+  int _dim_order[3];
+
   float _cut_ratio_upper;
   float _cut_ratio_lower;
 
  public:
   typedef float DataType;
-  MeanStdCalculator(int w, float cut_ratio_lower = 0, float cut_ratio_upper = 0) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper) {}
+  MeanStdCalculator(int w, float cut_ratio_lower = 0, float cut_ratio_upper = 0) : _width(w), _cut_ratio_lower(cut_ratio_lower), _cut_ratio_upper(cut_ratio_upper) {
+    _xmlpath[0] = 0;
+  }
   ~MeanStdCalculator() { 
       if (save(_filepath)) {
 #ifdef _LOGGING
         VLOG(_LOG_LEVEL_RADIOMETRIC) << "Means was saved to " << _filepath;
+#endif
+      }
+      if(_xmlpath[0] && save2xml(_xmlpath)){
+#ifdef _LOGGING
+        VLOG(_LOG_LEVEL_RADIOMETRIC) << "xml was saved to " << _xmlpath;
 #endif
       }
   }
@@ -548,7 +562,13 @@ class MeanStdCalculator : public FrameIterator {
     }
     return ret;
   }
-  void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
+  void SetFilePath(const char* filepath) {
+    strcpy(_filepath, filepath);
+  }
+  void SetXmlPath(const char* xmlpath){
+    if(xmlpath) strcpy(_xmlpath, xmlpath);
+    else _xmlpath[0] = 0;
+  }
   bool save(const char* filepath) {
     if (::xlingsky::raster::radiometric::save(filepath, _mean.data(), _mean.size(), _width)) {
       char path[512];
@@ -575,6 +595,74 @@ class MeanStdCalculator : public FrameIterator {
     _mean.insert(_mean.end(), mean.begin(), mean.end());
     _std.insert(_std.end(), std.begin(), std.end());
     return true;
+  }
+
+  void SetDimOrder(int order[3]) { memcpy(_dim_order, order, 3*sizeof(int)); }
+  bool save2xml(const char* xmlpath){
+    std::vector<double> a, b;
+    for(int i = 0;i<_mean.size(); i+=_width){
+      double mt = 0, st = 0;
+      int cnt = 0;
+      std::vector<bool> flag(_width);
+      for(int j=0; j < _width; ++j){
+        if(fabs(_std[i+j])<=std::numeric_limits<float>::epsilon()){
+          flag[j] = false;
+          continue;
+        }
+        mt += _mean[i+j];
+        st += _std[i+j];
+        ++cnt;
+        flag[j] = true;
+      }
+      if(cnt>0){
+        mt /= cnt;
+        st /= cnt;
+      }
+      for(int j=0; j < _width; ++j){
+        if(flag[j]){
+          a.push_back(st/_std[i+j]);
+          b.push_back(mt-_mean[i+j]*a.back());
+        }else{
+          a.push_back(1);
+          b.push_back(0);
+        }
+      }
+    }
+
+    char path[512], patha[512], pathb[512];
+    strcpy(path, xmlpath);
+    char* ps = strrchr(path, '.');
+    strcpy(ps, "_a.txt");
+    if (!::xlingsky::raster::radiometric::save(path, a.data(), a.size(), _width))
+      return false;
+    strcpy(patha, path);
+    strcpy(ps, "_b.txt");
+    if (!::xlingsky::raster::radiometric::save(path, b.data(), b.size(), _width))
+      return false;
+    strcpy(pathb, path);
+
+    FILE* fp = fopen(xmlpath, "w");
+    if(fp){
+      fprintf(fp, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+      fprintf(fp, "<HSP>\n");
+      fprintf(fp, "\t<dim_prior>%d,%d,%d</dim_prior>\n", _dim_order[1], _dim_order[2], _dim_order[0]);
+      fprintf(fp, "\t<task name=\"uniform\">\n");
+      fprintf(fp, "\t\t<a>%s</a>\n", patha);
+      fprintf(fp, "\t\t<b>%s</b>\n", pathb);
+      fprintf(fp, "\t</task>\n");
+      // if (_bp_path[0] && _hi_path[0]) {
+      //   fprintf(fp, "\t<task name=\"dpc\">\n");
+      //   fprintf(fp, "\t\t<file>%s</file>\n", _bp_path);
+      //   fprintf(fp, "\t</task>\n");
+      // }
+      fprintf(fp, "</HSP>\n");
+      fclose(fp);
+#ifdef _LOGGING
+      VLOG(_LOG_LEVEL_RADIOMETRIC) << "NUC xml was saved to " << xmlpath;
+#endif
+      return true;
+    }
+    return false;
   }
 };
 

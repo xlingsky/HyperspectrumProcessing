@@ -41,12 +41,21 @@ class ComboOperator : public Operator {
 
 class OperatorEx : public Operator {
  public:
-  OperatorEx() : _nodata(std::numeric_limits<double>::min()) {}
-  void SetNoDataValue(double d) { _nodata = d; }
-  double GetNoDataValue() const { return _nodata; }
+  OperatorEx() {}
+  void ClearNoDataValue() { _nodata.clear(); }
+  void AddNoDataValue(double d) { _nodata.emplace_back(d); }
+  template<typename it>
+  void AddNoDataValue(it first, it last){
+    _nodata.insert(_nodata.end(), first, last);
+  }
+  const std::vector<double>& GetNoDataValue() const { return _nodata; }
   template<typename T>
   bool IsNoData(T& d) const {
-    return (T)_nodata == d;
+    if(_nodata.size()==0) return false;
+    for(const auto&v : _nodata){
+      if((T)v==d) return true;
+    }
+    return false;
   }
   template<typename T>
   int FindValid(T* data, int n, int& st, int& ed){
@@ -57,7 +66,7 @@ class OperatorEx : public Operator {
     return ed-st+1;
   }
  private:
-  double _nodata;
+  std::vector<double> _nodata;
 };
 
 class FrameIterator : public OperatorEx {

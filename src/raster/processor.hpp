@@ -22,11 +22,14 @@ struct Patch {
   GDALDataset* dataset;
   int win[6];
   Patch() : dataset(nullptr) { memset(win, 0, sizeof(win)); }
-  void SetDataset(GDALDataset* d) {
+  void SetDataset(GDALDataset* d, int* w = nullptr) {
     dataset = d;
-    if (dataset)
-      SetWin(0, dataset->GetRasterXSize(), 0, dataset->GetRasterYSize(), 0,
-             dataset->GetRasterCount());
+    if (dataset){
+      if(w==nullptr)
+        SetWin(0, dataset->GetRasterXSize(), 0, dataset->GetRasterYSize(), 0, dataset->GetRasterCount());
+      else
+        SetWin(w[0], w[1], w[2], w[3], w[4], w[5]);
+    }
   }
   void SetWin(int xoff, int xsize, int yoff, int ysize, int bandoff,
               int bandsize) {
@@ -49,7 +52,8 @@ class Processor {
   Patch _dst;
   GDALDataType _datatype;
   std::vector<char> _buffer;
-  std::vector<int> _bandlist;
+  std::vector<int> _src_bandlist;
+  std::vector<int> _dst_bandlist;
   int _storeorder[3];
   DimSeg _seg[3];
   Operator* _op;
@@ -72,15 +76,17 @@ class Processor {
   }
   void SetDataType(GDALDataType datatype) { _datatype = datatype; }
   int GetDataTypeSize() const { return GDALGetDataTypeSizeBytes(_datatype); }
-  void SetSource(GDALDataset* src) { _src.SetDataset(src); }
-  void SetDestination(GDALDataset* dst) { _dst.SetDataset(dst); }
+  void SetSource(GDALDataset* src, int* win) { _src.SetDataset(src, win); }
+  void SetDestination(GDALDataset* dst, int* win) { _dst.SetDataset(dst, win); }
   Patch& source() { return _src; }
   Patch& destination() { return _dst; }
   bool Begin(DimSeg& seg, int dim) {
     _seg[dim] = seg;
     if (dim == 2) {
-      _bandlist.resize(seg.second);
-      std::iota(_bandlist.begin(), _bandlist.end(), _src.win[2] + seg.first + 1);
+      _src_bandlist.resize(seg.second);
+      _dst_bandlist.resize(seg.second);
+      std::iota(_src_bandlist.begin(), _src_bandlist.end(), _src.win[2] + seg.first + 1);
+      std::iota(_dst_bandlist.begin(), _dst_bandlist.end(), _dst.win[2] + seg.first + 1);
     }
     return true;
   }
@@ -106,7 +112,7 @@ class Processor {
         _src.dataset->RasterIO(
             GF_Read, _src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first,
             _seg[0].second, _seg[1].second, &_buffer[0], _seg[0].second,
-            _seg[1].second, _datatype, _seg[2].second, &_bandlist[0],
+            _seg[1].second, _datatype, _seg[2].second, &_src_bandlist[0],
             store_space[0], store_space[1], store_space[2]) == CE_None) {
       IndexType store_size[3] = {_seg[0].second, _seg[1].second, _seg[2].second};
       IndexType imoff[3] = {_src.win[0] + _seg[0].first, _src.win[1] + _seg[1].first, _src.win[2]+_seg[2].first};
@@ -115,10 +121,9 @@ class Processor {
 #endif
       if (_op->operator()(&_buffer[0], imoff, store_size, store_space, _storeorder)) {
         if (_dst.dataset) {
-          int* dst_bandlist = nullptr;
-          if (store_size[2] != _seg[2].second) {
-            dst_bandlist = new int[store_size[2]];
-            std::iota(dst_bandlist, dst_bandlist + store_size[2],
+          if (store_size[2] != _seg[2].second ) {
+            _dst_bandlist.resize(store_size[2]);
+            std::iota(_dst_bandlist.begin(), _dst_bandlist.end(),
                       _dst.win[2] + _seg[2].first + 1);
           }
 #ifdef _LOGGING
@@ -128,10 +133,9 @@ class Processor {
                   GF_Write, _dst.win[0] + _seg[0].first,
                   _dst.win[1] + _seg[1].first, store_size[0], store_size[1],
                   &_buffer[0], store_size[0], store_size[1], _datatype,
-                  store_size[2], dst_bandlist ? dst_bandlist : &_bandlist[0],
+                  store_size[2], &_dst_bandlist[0],
                   store_space[0], store_space[1], store_space[2]) == CE_None) {
           }
-          if (dst_bandlist) delete[] dst_bandlist;
         }
       }
     }

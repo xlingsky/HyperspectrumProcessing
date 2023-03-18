@@ -41,6 +41,20 @@ inline bool IsRasterDataset(const char* filepath){
   return true;
 }
 
+inline std::pair<double, double> GetDataTypeMinMax(GDALDataType type){
+  switch(type){
+    case GDT_Byte:
+      return std::make_pair(0, 255);
+    case GDT_Int16:
+      return std::make_pair(std::numeric_limits<short>::min(), std::numeric_limits<short>::max());
+    case GDT_UInt16:
+      return std::make_pair(std::numeric_limits<unsigned short>::min(), std::numeric_limits<unsigned short>::max());
+    case GDT_Float64:
+    default:
+      return std::make_pair(std::numeric_limits<float>::min(), std::numeric_limits<float>::max());
+  }
+}
+
 inline GDALDataset* GDALCreate(const char* filepath, int cols, int rows, int bands, GDALDataType type){
   GDALDataset* dataset;
   const char* ext = strrchr(filepath,'.');
