@@ -300,7 +300,7 @@ int main(int argc, char* argv[]){
           }
           vt = std::stoi(vs[i+1]);
           if(vt>0) src_win[i+1] = (std::min)(vt, src_win[i+1]-src_win[i]);
-          else if(vt<0) src_win[i+1] += vt-src_win[i];
+          else src_win[i+1] += vt-src_win[i];
         }
       }
       int dst_size[3];
