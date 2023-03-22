@@ -28,13 +28,28 @@ endif()
 	ADD_DEFINITIONS(-D_LOGGING)
 
 set(hsp
-  src/main.cc
+  src/hsp.cc
+  )
+
+set(geo
+  src/geo.cc
+  src/pos.cc
+  src/lx_geometry_rpc.cc
+  src/bigfileio.cc
+  )
+
+set(extractor
+  src/extractor.cc
   src/decode/decode.cc
   src/bigfileio.cc
   src/pos.cc
-  src/lx_geometry_rpc.cc
   )
 
 add_executable(hsp ${hsp})
-
 target_link_libraries(hsp PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS} )
+
+add_executable(geo ${geo})
+target_link_libraries(geo PRIVATE ${GDAL_LIBRARY} ${Boost_LIBRARIES})
+
+add_executable(extractor ${extractor})
+target_link_libraries(extractor PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES})
