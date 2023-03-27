@@ -52,11 +52,11 @@ class LookupTable : public Lookup<_SrcType, _DstType>{
   template<class Iterator>
   LookupTable(Iterator first, Iterator last) : _table(first, last) {}
   DstType operator[](SrcType x) const override{
-    int i;
-    if(x<0) i=0;
-    else if(x>_table.size()-1) i = (int)_table.size()-1;
-    else i = (int)x;
-    return _table[i];
+    // int i;
+    // if(x<0) i=0;
+    // else if(x>_table.size()-1) i = (int)_table.size()-1;
+    // else i = (int)x;
+    return _table[(int)x];
   }
   template<class Iterator>
   void set_table(Iterator first, Iterator last){
