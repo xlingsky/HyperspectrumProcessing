@@ -163,8 +163,15 @@ class Despeckle : public FrameIterator {
         xmax = MIN (cols - 1, x + adapt_radius);
 
         hist.update(src, pixelspace, linespace, xmin, ymin, xmax, ymax);
+        if (!hist.is_valid()) continue;
 
         int pos = x*pixelspace + (y * linespace);
+
+        if (std::isnan(src[pos]) || std::isinf(src[pos])){
+          dst[pos] = src[pos];
+          continue;
+        }
+
         auto pixel = hist.median (src[pos]);
 
         if (_filter_type & RECURSIVE)

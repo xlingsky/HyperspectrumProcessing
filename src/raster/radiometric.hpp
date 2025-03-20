@@ -542,24 +542,26 @@ class MeanStdCalculator : public FrameIterator {
   }
   std::pair<double, double> compute(DataType* data, int n, float cut_ratio_lower, float cut_ratio_upper) {
     std::pair<double, double> ret = std::make_pair(0, 0);
-    int cnt = 0;
-    std::sort(data, data+n);
+
+    DataType* end = RemoveNoData(data, data+n);
+    n = end-data;
     int st, ed;
-    n = FindValid(data, n, st, ed);
-    st += int(n*cut_ratio_lower);
-    ed -= int(n*cut_ratio_upper);
+    st = int(n*cut_ratio_lower);
+    ed = n - int(n*cut_ratio_upper);
+    n = ed-st;
+
+    if(n<=0) return ret;
+
+    std::sort(data, end);
 
     int i = st;
-    while(i<=ed){
+    while(i<ed){
       ret.first += data[i];
       ret.second += (double)data[i] * data[i];
       ++i;
     }
-    n = ed-st+1;
-    if(n>0){
-      ret.first /= n;
-      ret.second = std::sqrt(ret.second / n - ret.first * ret.first);
-    }
+    ret.first /= n;
+    ret.second = std::sqrt(ret.second / n - ret.first * ret.first);
     return ret;
   }
   void SetFilePath(const char* filepath) {
@@ -686,10 +688,9 @@ class MedianCalculator : public FrameIterator {
   }
   void SetFilePath(const char* filepath) { strcpy(_filepath, filepath); }
   DataType compute(DataType* data, int n) {
-    std::sort(data, data + n);
-    int st, ed;
-    FindValid(data, n, st, ed);
-    return data[(st+ed) >> 1];
+    DataType* end = RemoveNoData(data, data+n);
+    std::sort(data, end);
+    return data[(end-data) >> 1];
   }
   bool save(const char* filepath) {
     return ::xlingsky::raster::radiometric::save(filepath, _median.data(), _median.size(),
@@ -838,12 +839,12 @@ class NucCalculator : public FrameIterator{
 #endif
     for (int r = 0; r < rows; ++r) {
       DataType* t = pdata+r*cols;
-      std::sort( t, t+cols);
-      int st, ed;
-      int n = FindValid(t, cols, st, ed);
-      st += int(n*_cut_ratio_dark);
-      ed -= int(n*_cut_ratio_bright);
-      if (ed - st < 0) {
+      DataType* end = RemoveNoData(t, t+cols);
+      std::sort( t, end);
+      int n = end-t;
+      int st = int(n*_cut_ratio_dark);
+      int ed = n - 1 - int(n * _cut_ratio_bright);
+      if (ed < st) {
         bws[r].stat = rows+1;
         continue;
       }

@@ -29,6 +29,7 @@ class DespeckleHistogram : public xlingsky::raster::Histogram<T>{
     _xmax = xmax;
     _ymax = ymax;
   }
+  bool is_valid() const { return base::valid_count() > 0; }
   void adds(reference_type src, int pixelspace, int linespace, int xmin,
             int ymin, int xmax, int ymax) {
     if (xmin > xmax)

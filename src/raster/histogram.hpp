@@ -56,6 +56,7 @@ class Histogram{
   index_type _valid_count;
   index_type _under_minimum_count;
   index_type _beyond_maximum_count;
+  // value_type _nodata;
  public:
   Histogram(value_type start = 0, value_type end = 256, value_type step = 1)
       : _range(start, end, step), _valid_count(0), _under_minimum_count(0), _beyond_maximum_count(0) {
@@ -152,17 +153,24 @@ class Histogram{
       --_valid_count;
     }
   }
-#define BATCH_FUNCTION(name)                                            \
-  void name##s(reference_type src, index_type cols, index_type rows, index_type pixelspace, index_type linespace) { \
-    if(cols<=0 || rows<=0 ) return;                                     \
-    struct _##name{                                                     \
-      self* _p;                                                         \
-      _##name(self* p) : _p(p) {}                                       \
-      void operator()(const void* data){                                \
-        _p->name((reference_type)data);                                 \
-      }                                                                 \
-    } op(this);                                                         \
-    xlingsky::raster::transform(src, cols, rows, pixelspace*sizeof(value_type), linespace*sizeof(value_type), op); \
+#define BATCH_FUNCTION(name)                                                   \
+  void name##s(reference_type src, index_type cols, index_type rows,           \
+               index_type pixelspace, index_type linespace) {                  \
+    if (cols <= 0 || rows <= 0)                                                \
+      return;                                                                  \
+    struct _##name {                                                           \
+      self *_p;                                                                \
+      _##name(self *p) : _p(p) {}                                              \
+      void operator()(const void *data) {                                      \
+        reference_type t = (reference_type)data;                               \
+        if (std::isnan(*t) || std::isinf(*t))                                  \
+          return;                                                              \
+        _p->name(t);                                                           \
+      }                                                                        \
+    } op(this);                                                                \
+    xlingsky::raster::transform(src, cols, rows,                               \
+                                pixelspace * sizeof(value_type),               \
+                                linespace * sizeof(value_type), op);           \
   }
 
   BATCH_FUNCTION(add);

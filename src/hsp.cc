@@ -106,6 +106,7 @@ int main(int argc, char* argv[]){
   if(nodata.size()>0){
     VLOG(2) << "NoData# = " << nodata.size();
     VLOG(3) << "NoData Value = " << nodata;
+    while (nodata.size()>0 && std::isnan(nodata.back())) nodata.pop_back();
   }
 
   int src_size[3] = {src->GetRasterXSize(), src->GetRasterYSize(), src->GetRasterCount()};
@@ -237,7 +238,7 @@ int main(int argc, char* argv[]){
       boutput = 1;
     }else if (name == "median") {
       int ksize = v.second.get<int>("ksize", 3);
-      std::string method = v.second.get<std::string>("method", "adapt");
+      std::string method = v.second.get<std::string>("method", "else");
       xlingsky::raster::Operator* op = nullptr;
       if(method == "adapt"){
         float start = v.second.get<float>("hist_min", 7);

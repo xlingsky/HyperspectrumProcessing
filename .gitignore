@@ -2,6 +2,7 @@ build*
 xcode/
 data/
 __pycache__/
+.cache/
 
 compile_commands.json
 launch.json

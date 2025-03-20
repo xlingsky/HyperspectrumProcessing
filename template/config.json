@@ -1,0 +1,10 @@
+{
+  "dstdir" : "./output_pair",
+  "data" : [
+    {"img" : "sort.xml"},
+    {"img" : "nuc.xml"}
+    ],
+  "tasklist" : [
+    {"type" : "nuc"}
+  ]
+}

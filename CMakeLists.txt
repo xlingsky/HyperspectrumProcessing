@@ -4,7 +4,7 @@ project(HSP)
 SET(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(GDAL REQUIRED)
+find_package(GDAL CONFIG REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Boost COMPONENTS  filesystem REQUIRED)
 find_package(glog REQUIRED)
@@ -27,7 +27,7 @@ endif()
 
 	ADD_DEFINITIONS(-D_LOGGING)
 
-set(hsp
+set(raster
   src/hsp.cc
   )
 
@@ -45,11 +45,11 @@ set(extractor
   src/pos.cc
   )
 
-add_executable(hsp ${hsp})
-target_link_libraries(hsp PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS} )
+add_executable(hsp_raster ${raster})
+target_link_libraries(hsp_raster PRIVATE GDAL::GDAL gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS} )
 
-add_executable(geo ${geo})
-target_link_libraries(geo PRIVATE ${GDAL_LIBRARY} ${Boost_LIBRARIES})
+add_executable(hsp_geo ${geo})
+target_link_libraries(hsp_geo PRIVATE GDAL::GDAL ${Boost_LIBRARIES})
 
-add_executable(extractor ${extractor})
-target_link_libraries(extractor PRIVATE ${GDAL_LIBRARY} gflags glog::glog ${Boost_LIBRARIES})
+add_executable(hsp_extractor ${extractor})
+target_link_libraries(hsp_extractor PRIVATE GDAL::GDAL gflags glog::glog ${Boost_LIBRARIES})

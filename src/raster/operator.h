@@ -51,19 +51,26 @@ class OperatorEx : public Operator {
   const std::vector<double>& GetNoDataValue() const { return _nodata; }
   template<typename T>
   bool IsNoData(T& d) const {
+    if ( std::isnan(d) ) return true;
     if(_nodata.size()==0) return false;
     for(const auto&v : _nodata){
       if((T)v==d) return true;
     }
     return false;
   }
-  template<typename T>
-  int FindValid(T* data, int n, int& st, int& ed){
-    st = 0;
-    ed = n-1;
-    while(IsNoData(data[st]) && st<n) ++st;
-    while(st<=ed && IsNoData(data[ed])) --ed;
-    return ed-st+1;
+  template<typename Iter>
+  Iter RemoveNoData(Iter first, Iter last){
+    Iter insert, cur;
+    insert = cur = first;
+    while(cur != last){
+      if (!IsNoData(*cur)) {
+        if (cur != insert)
+          *insert = *cur;
+        ++insert;
+      }
+      ++cur;
+    }
+    return insert;
   }
  private:
   std::vector<double> _nodata;
