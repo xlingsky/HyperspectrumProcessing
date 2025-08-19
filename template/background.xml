@@ -1,0 +1,10 @@
+<HSP>
+<dim_prior>0,1,2</dim_prior>
+<!-- <task name="background">
+<removal>false</removal>
+<ksize>10</ksize> -->
+<task name="removal">
+<background>/Users/xlingsky/Desktop/demo/added_background.tif</background>
+<interval>10</interval>
+</task>
+</HSP>

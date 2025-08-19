@@ -3,18 +3,30 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <iostream>
-#include <limits>
 #include <cctype>
 
 #include <boost/algorithm/string/case_conv.hpp>
-#include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
 #include <boost/foreach.hpp>
 #include <boost/algorithm/string.hpp>
 
-#include "pathadaptor.hpp"
 #include "raster.hpp"
 #include "ipf.hpp"
+#include "raster/anomalydetection.hpp"
+#include "raster/common.hpp"
+#include "raster/extractor.hpp"
+#include "raster/filter.hpp"
+#include "raster/io.hpp"
+#include "raster/operator.h"
+#include "util/config.hpp"
+
+//////////////////////////////////////////////////////////////////////////
+/*
+new framework:
+1. flowing arguments: tile info like rasterio
+2. change tilemanager|buffer & io to operator
+*/
+//////////////////////////////////////////////////////////////////////////
 
 DEFINE_string(o,"", "output directory");
 DEFINE_string(task,"", "file for tasklist");
@@ -60,7 +72,7 @@ int main(int argc, char* argv[]){
     usage = usage + name + " -task <task xml file> <image file>\n";
   }
   gflags::SetUsageMessage(usage);
-  gflags::SetVersionString("2.3");
+  gflags::SetVersionString("2.4");
 
   google::InitGoogleLogging(argv[0]);
   gflags::ParseCommandLineFlags(&argc, &argv, true);
@@ -81,7 +93,7 @@ int main(int argc, char* argv[]){
     LOG(ERROR) << e.what();
     return 2;
   }
-  boost::filesystemEx::pathadaptor adaptor(FLAGS_task);
+  boost::filesystem::path taskpath(FLAGS_task.c_str());
 
   GDALDataset* src = (GDALDataset*)GDALOpen(path.string().c_str(), GA_ReadOnly);
   if (src == nullptr){
@@ -127,8 +139,8 @@ int main(int argc, char* argv[]){
       else src_win[i+1] += vt-src_win[i];
     }
   }
-  int dst_size[3];
-  int dst_win[6];
+
+  int dst_size[3], dst_win[6], buffer_size[3];
   if(FLAGS_oc){
     dst_win[0] = dst_win[2] = dst_win[4] = 0;
     dst_size[0] = dst_win[1] = src_win[1];
@@ -147,6 +159,7 @@ int main(int argc, char* argv[]){
   GDALDataset* dst = nullptr;
 
   xlingsky::raster::ComboOperator* ops = new xlingsky::raster::ComboOperator;
+  xlingsky::raster::ComboOperator* ios = new xlingsky::raster::ComboOperator;
   xlingsky::raster::Processor frame( ops,GDT_Float32, FLAGS_fc);
   int store_prior[3] = {0,2,1};
   boost::filesystem::path outpath;
@@ -163,114 +176,97 @@ int main(int argc, char* argv[]){
     }
   }
   std::vector<std::string> post_tasks;
+  int retcode = 0;
 
   BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("HSP")) {
     if (v.first != "task") continue;
     auto name = v.second.get_child("<xmlattr>.name").get_value<std::string>();
+    xlingsky::util::config config( v.second, taskpath);
     if (name == "uniform") {
-      std::string a, b;
-      try{
-        a = v.second.get<std::string>("a");
-        b = v.second.get<std::string>("b");
-      }catch(const boost::property_tree::ptree_error& e){
-        std::cerr << e.what() << std::endl;
-        return 2;
-      }
-      float dst_min = v.second.get<float>("dst_min", (std::numeric_limits<float>::min)());
-      float dst_max = v.second.get<float>("dst_max", (std::numeric_limits<float>::max)());
-      xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src_size[store_prior[0]],src_size[store_prior[1]], dst_min, dst_max);
-      if (!op->load(adaptor.absolutepath(a).string().c_str(), adaptor.absolutepath(b).string().c_str())) {
-        std::cout << "ERROR:uniform file not loaded a and b" << std::endl;
-        return 1;
+      xlingsky::raster::radiometric::NonUniformCorrection* op = new xlingsky::raster::radiometric::NonUniformCorrection(src_size[store_prior[0]],src_size[store_prior[1]]);
+      if (!op->load_config(config)) {
+        std::cout << "NonUniformCorrection: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
       }
       if(nodata.size()>0) op->AddNoDataValue(nodata.begin(), nodata.end());
       ops->Add(op);
       boutput = 1;
     }
     else if (name == "dpc") {
-      std::string b = v.second.get<std::string>("file");
-      xlingsky::raster::radiometric::DefectivePixelCorrection* op = nullptr;
-      xlingsky::raster::radiometric::DefectivePixelCorrectionV2* p1 = new xlingsky::raster::radiometric::DefectivePixelCorrectionV2;
-      if( p1->load(adaptor.absolutepath(b).string().c_str(), src_size[0], src_size[1], src_size[2])){
-        op = p1;
-      }else {
-        delete p1;
-        xlingsky::raster::radiometric::DefectivePixelCorrectionV1* p2 = new xlingsky::raster::radiometric::DefectivePixelCorrectionV1;
-        int pt[3];
-        {
-          std::string prior = v.second.get<std::string>("dim_prior", "");
-          std::vector<std::string> result;
-          boost::split(result, prior, boost::is_any_of(","));
-          if (result.size() == 3) {
-            pt[0] = std::stoi(result[0]);
-            pt[1] = std::stoi(result[1]);
-            pt[2] = std::stoi(result[2]);
-          }else{
-            memcpy(pt, store_prior, sizeof(int)*3);
-          }
-        }
-        if(!p2->load(adaptor.absolutepath(b).string().c_str(), src_size[pt[0]], src_size[pt[1]], pt[2])){
-          delete p2;
-          std::cout << "ERROR:dpc file not loaded!" << std::endl;
-          return 1;
-        }
-        op = p2;
+      xlingsky::raster::radiometric::DefectivePixelCorrection* op = xlingsky::raster::radiometric::DefectivePixelCorrection::Create(config, src_size, store_prior);
+      if (op==nullptr) {
+        std::cout << "DefectivePixelCorrection: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
       }
       ops->Add(op);
       boutput = 1;
     }
     else if (name == "extend"){
       xlingsky::raster::common::Extend* op = new xlingsky::raster::common::Extend();
-      std::string b = v.second.get<std::string>("file");
-      if (!op->load(adaptor.absolutepath(b).string().c_str(), src_size[store_prior[0]], src_size[store_prior[1]])) {
-        std::cout << "ERROR:extend file not loaded " << std::endl;
-        return 1;
+      if (!op->load( config.filepath("file").string().c_str(), src_size[store_prior[0]], src_size[store_prior[1]])) {
+        std::cout << "EXTEND: FALIED to load file!" << std::endl;
+        retcode = 1;
+        goto finished;
       }
       ops->Add(op);
       boutput = 1;
     }
     else if (name == "gauss") {
-      int band = v.second.get<int>("band");
-      int ksize = v.second.get<int>("ksize");
-      int dim = v.second.get<int>("dim", 1);
-      xlingsky::raster::filter::LinearFilter* op = new xlingsky::raster::filter::LinearFilter(ksize, band, dim);
+      xlingsky::raster::filter::LinearFilter* op = new xlingsky::raster::filter::LinearFilter();
+      if (!op->load_config(config)) {
+        std::cout << "GAUSSIANFILTER: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
+      }
       ops->Add(op);
       boutput = 1;
     }else if (name == "median") {
-      int ksize = v.second.get<int>("ksize", 3);
       std::string method = v.second.get<std::string>("method", "else");
       xlingsky::raster::Operator* op = nullptr;
       if(method == "adapt"){
-        float start = v.second.get<float>("hist_min", 7);
-        float end = v.second.get<float>("hist_max", 4000);
-        float step = v.second.get<float>("hist_step", 1);
-        xlingsky::raster::enhancement::Despeckle* p = new xlingsky::raster::enhancement::Despeckle(ksize, start, end, step);
+        xlingsky::raster::filter::Despeckle* p = new xlingsky::raster::filter::Despeckle();
+        if (!p->load_config(config)) {
+          std::cout << "DESPECKLE: config not loaded correctly!"
+                    << std::endl;
+          retcode = 1;
+          goto finished;
+        }
         op = p;
       }else{
-        xlingsky::raster::filter::MedianBlur* p = new xlingsky::raster::filter::MedianBlur(ksize);
+        xlingsky::raster::filter::MedianBlur* p = new xlingsky::raster::filter::MedianBlur();
+        if (!p->load_config(config)) {
+          std::cout << "MEDIANBLUR: config not loaded correctly!"
+                    << std::endl;
+          retcode = 1;
+          goto finished;
+        }
         op = p;
       }
       ops->Add(op);
       boutput = 1;
     }else if(name == "dark"){
-      std::string b = v.second.get<std::string>("b");
       std::string a = v.second.get<std::string>("a","");
-      std::string index = v.second.get<std::string>("index","");
       float dst_min = v.second.get<float>("dst_min", (std::numeric_limits<float>::min)());
       float dst_max = v.second.get<float>("dst_max", (std::numeric_limits<float>::max)());
       xlingsky::raster::radiometric::PixelCorrection* op = nullptr;
-      if(a.empty() || index.empty()){
+      if(a.empty()){
         xlingsky::raster::radiometric::DarkBackgroundCorrection* p = new xlingsky::raster::radiometric::DarkBackgroundCorrection(src_size[store_prior[0]],src_size[store_prior[1]], dst_min, dst_max);
-        if (!p->load(adaptor.absolutepath(b).string().c_str())) {
+        if (!p->load(config.filepath("b").string().c_str())) {
           std::cout << "ERROR:dark file not loaded b" << std::endl;
-          return 1;
+          retcode = 1;
+          goto finished;
         }
         op = p;
       }else{
         xlingsky::raster::radiometric::DarkBackgroundLinear* p = new xlingsky::raster::radiometric::DarkBackgroundLinear(src_size[store_prior[0]],src_size[store_prior[1]],src_size[store_prior[2]], dst_min, dst_max);
-        if (!p->load(adaptor.absolutepath(a).string().c_str(),adaptor.absolutepath(b).string().c_str(),adaptor.absolutepath(index).string().c_str())) {
+        if (!p->load(config.filepath("a").string().c_str(),
+                     config.filepath("b").string().c_str(),
+                     config.filepath("index", "").string().c_str())) {
           std::cout << "ERROR:linear dark file not loaded a,b,index" << std::endl;
-          return 1;
+          retcode = 1;
+          goto finished;
         }
         op = p;
       }
@@ -327,26 +323,12 @@ int main(int argc, char* argv[]){
       boutput = 1;
     }
     else if (name == "nuc"){
-      float cut_ratio_dark = v.second.get<float>("cut_dark", 0.03);
-      float cut_ratio_bright = v.second.get<float>("cut_bright", 0.1);
-      float ratio_threshold_dark = v.second.get<float>("threshold_dark", 0.03);
-      float ratio_threshold_bright = v.second.get<float>("threshold_bright", 0.03);
-      int sample_num_dark = v.second.get<int>("sample_dark", 40);
-      int sample_num_bright = v.second.get<int>("sample_bright", 40);
-      int tile_size = v.second.get<int>("tile_size", (std::numeric_limits<int>::max)());
-      int tile_overlap = v.second.get<int>("tile_overlap", -1);
-      bool preferred_a = v.second.get<bool>("a", true);
-      bool debug = v.second.get<bool>("debug", true);
-      std::string t = v.second.get<std::string>("interp", "pchip");
-      xlingsky::raster::radiometric::NucCalculator::InterpType type;
-      if(t=="makima")
-        type = xlingsky::raster::radiometric::NucCalculator::MAKIMA;
-      else if(t=="barycentric")
-        type = xlingsky::raster::radiometric::NucCalculator::BARYCENTRIC;
-      else
-        type = xlingsky::raster::radiometric::NucCalculator::PCHIP;
-      if(tile_overlap<0) tile_overlap = tile_size/2;
-      xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(src_size[store_prior[1]], cut_ratio_dark, cut_ratio_bright, ratio_threshold_dark, ratio_threshold_bright, sample_num_dark, sample_num_bright, tile_size, tile_overlap, type, preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET);
+      xlingsky::raster::radiometric::NucCalculator* op = new xlingsky::raster::radiometric::NucCalculator(src_size[store_prior[1]]);
+      if (!op->load_config(config)) {
+        std::cout << "NUCCALCULATOR: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
+      }
       if(nodata.size()>0) op->AddNoDataValue(nodata.begin(), nodata.end());
       char apath[512], bpath[512], bppath[512], xmlpath[512], hipath[512], lopath[512];
       boost::filesystem::path dstpath;
@@ -374,7 +356,7 @@ int main(int argc, char* argv[]){
         t = dstpath;
         t += "uniform.xml";
         strcpy(xmlpath, t.string().c_str());
-        if (debug){
+        if (v.second.get<bool>("debug", false)) {
           t = dstpath;
           t += "hi.txt";
           strcpy(hipath, t.string().c_str());
@@ -400,52 +382,13 @@ int main(int argc, char* argv[]){
       }
     }
     else if (name == "interp") {
-      std::vector<double> wl_old, wl_new;
-      xlingsky::raster::spectrum::Interpolator::InterpType type;
-      int num_lines = src->GetRasterXSize(), num_samples_old = src->GetRasterCount(), num_samples_new;
-      {
-        std::string w0 = v.second.get<std::string>("wl0");
-        std::string w1 = v.second.get<std::string>("wl1");
-
-        std::vector<std::string> result;
-        boost::split(result, w0, boost::is_any_of(", ;"));
-        for (auto& r : result)
-          wl_old.push_back(std::stod(r));
-        boost::split(result, w1, boost::is_any_of(", ;"));
-        for (auto& r : result)
-          wl_new.push_back(std::stod(r));
-
-        bool flag = false;
-        if(wl_old.size()==num_samples_old){
-          num_samples_new = wl_new.size();
-          flag = true;
-        }else if(wl_old.size()==(size_t)num_samples_old*num_lines){
-          num_samples_new = wl_new.size()/num_lines;
-          if(num_samples_new>0) flag = true;
-        }
-        if (!flag) {
-          std::cout << "ERROR: interp wl length MISMATCH" << std::endl;
-          GDALClose(src);
-          return 1;
-        }
-
-        std::string t = v.second.get<std::string>("type", "pchip");
-        if (t == "spline_cubic")
-          type = xlingsky::raster::spectrum::Interpolator::BSPLINE_CUBIC;
-        else if(t=="spline_quintic")
-          type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUINTIC;
-        else if(t=="spline_quadratic")
-          type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUADRATIC;
-        else if(t=="makima")
-          type = xlingsky::raster::spectrum::Interpolator::MAKIMA;
-        else if(t=="barycentric")
-          type = xlingsky::raster::spectrum::Interpolator::BARYCENTRIC;
-        else
-          type = xlingsky::raster::spectrum::Interpolator::PCHIP;
+      xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(src->GetRasterXSize(), src->GetRasterCount());
+      if (!op->load_config(config)) {
+        std::cout << "SPECTRUMINTERPOLATOR: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
       }
-      dst_size[2] = dst_win[5] = num_samples_new;
-      xlingsky::raster::spectrum::Interpolator* op = new xlingsky::raster::spectrum::Interpolator(num_lines, wl_old, num_samples_old, wl_new, num_samples_new);
-      op->SetInterpType(type);
+      dst_size[2] = dst_win[5] = op->num_samples_new();
       ops->Add(op);
       boutput = 1;
     } else if (name == "destripe") {
@@ -455,64 +398,20 @@ int main(int argc, char* argv[]){
       ops->Add(op);
       boutput = 1;
     }else if(name == "render"){
-      float src_min = v.second.get<float>("src_min", 7);
-      float src_umax = v.second.get<float>("src_umax", 4000);
-      float dst_min = v.second.get<float>("dst_min", 0);
-      float dst_max = v.second.get<float>("dst_max", 255);
-      if(FLAGS_ot.empty()){
-        if(dst_max<(int)(std::numeric_limits<unsigned char>::max)()+1)
-          FLAGS_ot = "byte";
-      }
       std::string m = v.second.get<std::string>("mode", "WALLIS|MINMAX|CUT|TILE");
       std::transform(m.begin(), m.end(), m.begin(),
                      [](unsigned char c){ return std::tolower(c); });
-      int mode = 0;
-      if(m.find("minmax")!=std::string::npos)
-        mode |= 0x01;
-      if(m.find("cut")!=std::string::npos)
-        mode |= 0x02;
-      if(m.find("hist")!=std::string::npos)
-        mode |= 0x04;
-      if(m.find("wallis")!=std::string::npos)
-        mode |= 0x08;
-      if(m.find("tile")!=std::string::npos)
-        mode |= 0x40;
-      if(m.find("global")!=std::string::npos)
-        mode |= 0x80;
+      bool bglobal = (m.find("global")!=std::string::npos);
 
-      xlingsky::raster::LutCreator* lut = nullptr;
-      if ((mode & 0x02) || (mode & 0x04) || (mode & 0x08)) {
-        float src_step = v.second.get<float>("src_step", 1);
-        if(mode&0x08){
-          float dst_mean = v.second.get<float>("dst_mean", 127);
-          float dst_std = v.second.get<float>("dst_std", 70);//40-70
-          float c = v.second.get<float>("c", 0.8);//0-1
-          float b = v.second.get<float>("b", 0.9);//0-1
-          xlingsky::raster::LutWallis* l = new xlingsky::raster::LutWallis(src_step, src_min, src_umax, dst_min, dst_max);
-          l->Setup(dst_mean, dst_std, c, b);
-          lut = l;
-        }else{
-          float cut_ratio_lower = v.second.get<float>("cut_lower", 0.002);
-          float cut_ratio_upper = v.second.get<float>("cut_upper", 0.002);
-          if(mode&0x02){
-            xlingsky::raster::LutLinear* l = new xlingsky::raster::LutLinear(src_step, src_min, src_umax, dst_min, dst_max);
-            l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
-            lut = l;
-          }else{
-            float hist_clip = v.second.get<float>("hist_clip", 10);
-            xlingsky::raster::LutClahe* l = new xlingsky::raster::LutClahe(hist_clip,src_step, src_min, src_umax, dst_min, dst_max);
-            l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
-            lut = l;
-          }
-        }
-      }else{
-        xlingsky::raster::LutCreator* l = new xlingsky::raster::LutCreator(src_min, src_umax, dst_min, dst_max);
-        lut = l;
+      xlingsky::raster::LutCreator* lut = xlingsky::raster::LutCreate(config);
+      if(FLAGS_ot.empty()){
+        if(lut->dst_maximum()<(int)(std::numeric_limits<unsigned char>::max)()+1)
+          FLAGS_ot = "byte";
       }
 
       int resample_col_step = v.second.get<float>("resample_col_step", 3);
       int resample_row_step = v.second.get<float>("resample_row_step", 3);
-      if(mode&0x40){
+      if(m.find("tile")!=std::string::npos){
         unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 0);
         unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 0);
         unsigned int grid_x = v.second.get<unsigned int>("grid_x", 8);
@@ -534,26 +433,124 @@ int main(int argc, char* argv[]){
           }
         }
         xlingsky::raster::BiTileLut* op =
-            new xlingsky::raster::BiTileLut( tile_cols, tile_rows, (mode&0x80)?xlingsky::raster::BiTileLut::GLOBAL:xlingsky::raster::BiTileLut::NONE);
+            new xlingsky::raster::BiTileLut( tile_cols, tile_rows, bglobal?xlingsky::raster::BiTileLut::GLOBAL:xlingsky::raster::BiTileLut::NONE);
         op->set_lut_creator(lut);
         op->set_resample_interval(resample_col_step, resample_row_step);
         ops->Add(op);
       }else{
         xlingsky::raster::enhancement::Render* op =
-            new xlingsky::raster::enhancement::Render((mode&0x80)?xlingsky::raster::enhancement::Render::GLOBAL:xlingsky::raster::enhancement::Render::NONE);
+            new xlingsky::raster::enhancement::Render(bglobal?xlingsky::raster::enhancement::Render::GLOBAL:xlingsky::raster::enhancement::Render::NONE);
         op->set_lut_creator(lut);
         op->set_resample_interval(resample_col_step, resample_row_step);
         ops->Add(op);
       }
       boutput = 1;
+    } else if(name == "extractor"){
+      std::string type = v.second.get<std::string>("type", "peak");
+      boost::filesystem::path dstpath;
+      if(FLAGS_o.empty()){
+        dstpath = path;
+      }else{
+        dstpath = FLAGS_o;
+        if(boost::filesystem::is_directory(dstpath)){
+          dstpath /= path.filename();
+        }
+      }
+      dstpath.replace_extension();
+      dstpath += "_"+type;
+      xlingsky::raster::Operator* op = nullptr;
+      if(type=="peak"){
+        xlingsky::raster::extractor::PeakDetection* p = 
+        new xlingsky::raster::extractor::PeakDetection(src_size[store_prior[2]], v.second);
+        std::string pointpath = dstpath.string() + "_points.txt";
+        std::string linepath = dstpath.string() + "_lines.txt";
+        p->SetFilePath(pointpath.c_str(), linepath.c_str());
+        op = p;
+        boutput = 1;
+      } else{
+        dstpath += ".txt";
+        auto *p = new xlingsky::raster::extractor::LSDExtractor(
+            src_size[store_prior[2]], v.second);
+        p->SetFilePath(dstpath.string().c_str());
+        op = p;
+      }
+      ops->Add(op);
+      if (FLAGS_v<2) {
+        boutput = 0;
+      }
+    }else if (name == "background") {
+      auto * op = new xlingsky::raster::BackgroundExtraction<xlingsky::raster::ImageWriter>();
+      if (!op->load_config(config)) {
+        std::cout << "BACKGROUND: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
+      }
+
+      std::string dstpath = "in_memory";
+      bool removal = v.second.get<bool>("removal", true);
+      if (!removal) {
+        boost::filesystem::path temp;
+        if (FLAGS_o.empty()) {
+          temp = path;
+        } else {
+          temp = FLAGS_o;
+          if (boost::filesystem::is_directory(dstpath)) {
+            temp /= path.filename();
+          }
+        }
+        temp.replace_extension();
+        temp += "_background.tif";
+        dstpath = temp.string();
+      }
+
+      auto* imwriter = new xlingsky::raster::ImageWriter(
+          dstpath.c_str(), src_size[store_prior[0]], src_size[store_prior[1]], op->get_blknum(src_size[store_prior[2]]), GDT_Float32);
+      op->set_exporter(imwriter);
+      ios->Add(imwriter);
+      ops->Add(op);
+      if (removal) {
+        auto* t = new xlingsky::raster::common::Minus(imwriter->ptr(), op->get_ksize());
+        ops->Add(t);
+      }
+    }else if (name == "removal") {
+      auto* op = new xlingsky::raster::common::Minus();
+      ops->Add(op);
+      if (!op->load_config(config)) {
+        std::cout << "REMOVAL: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
+      }
+      if (!op->good()) {
+        if (argc < 3 || !op->set_dataset(argv[2]) ) {
+          std::cout << "REMOVAL: need a background dataset !" << std::endl;
+          retcode = 1;
+          goto finished;
+        }
+      }
+      boutput = 1;
+      if (FLAGS_ot.empty()){
+        FLAGS_ot = "float32";
+      }
+    }else if (name == "anomaly") {
+      xlingsky::raster::RXDetector* op = new xlingsky::raster::RXDetector();
+      if (!op->load_config(config)) {
+        std::cout << "ANOMALYDETECTION: config not loaded correctly!" << std::endl;
+        retcode = 1;
+        goto finished;
+      }
+      dst_size[store_prior[2]] = dst_win[store_prior[2]*2+1] = op->get_blknum(src_size[store_prior[2]]);
+      ops->Add(op);
+      boutput = 1;
+      if (FLAGS_ot.empty()){
+        FLAGS_ot = "float32";
+      }
     }
   }
 
   VLOG(1) << "Total number of tasks is " << ops->size();
   if(ops->size()<1){
-    delete ops;
-    GDALClose(src);
-    return 1;
+    retcode = 1;
+    goto finished;
   }
 
   if (boutput) {
@@ -562,7 +559,11 @@ int main(int argc, char* argv[]){
       outpath = path;
       outpath.replace_extension();
       outpath += "_mod";
-      outpath += path.extension();
+      if (path.extension() == ".png" || path.extension() == ".jpg") {
+        outpath += ".tif";
+      }else {
+        outpath += path.extension();
+      }
     }
   }
   if (!outpath.empty()) {
@@ -583,25 +584,24 @@ int main(int argc, char* argv[]){
       dst = (GDALDataset*)GDALOpen(outpath.string().c_str(), GA_Update);
       if(dst==nullptr || dst->GetRasterXSize()!=dst_size[0] || dst->GetRasterYSize()!=dst_size[1] || dst->GetRasterCount()!=dst_size[2]){
         LOG(ERROR) << "The existing target size doesn't match the estimation";
-        delete ops;
-        GDALClose(src);
-        GDALClose(dst);
-        return 3;
+        retcode = 3;
+        goto finished;
       }
     }else
       dst = GDALCreate(outpath.string().c_str(), dst_size[0], dst_size[1], dst_size[2], datatype);
     if (dst == nullptr) {
-      delete ops;
-      GDALClose(src);
-      return 1;
+      retcode = 3;
+      goto finished;
     };
   }
   frame.SetStoreOrder(store_prior);
   frame.SetSource(src, src_win);
   if (dst) frame.SetDestination(dst, dst_win);
 
-  int buffer_size[3] = {dst_win[1], dst_win[3], dst_win[5]};
   {
+    buffer_size[0] = std::max(src_win[1], dst_win[1]);
+    buffer_size[1] = std::max(src_win[3], dst_win[3]);
+    buffer_size[2] = std::max(src_win[5], dst_win[5]);
     size_t max_buffer_size = (size_t)FLAGS_buffer<<20;
     size_t l = max_buffer_size / ((size_t)frame.GetDataTypeSize() * buffer_size[store_prior[0]] * buffer_size[store_prior[1]]);
     if (l == 0) l = 1;
@@ -613,12 +613,17 @@ int main(int argc, char* argv[]){
 
   xlingsky::ipf::TileProcessing( frame.source().win+3, buffer_size, &frame);
 
+  finished:
+
   delete ops;
+  delete ios;
   if (dst) {
-    double aop6[6];
-    if(src->GetGeoTransform(aop6)==CE_None)
-      dst->SetGeoTransform(aop6);
-    dst->SetProjection(src->GetProjectionRef());
+    if (FLAGS_oc) {
+      double aop6[6];
+      if (src->GetGeoTransform(aop6) == CE_None)
+        dst->SetGeoTransform(aop6);
+      dst->SetProjection(src->GetProjectionRef());
+    }
     GDALClose(dst);
   }
   GDALClose(src);
@@ -630,5 +635,5 @@ int main(int argc, char* argv[]){
       system(cmd.c_str());
     }
   }
-  return 0;
+  return retcode;
 }

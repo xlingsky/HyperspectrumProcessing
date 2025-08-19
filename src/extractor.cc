@@ -5,12 +5,12 @@
 #include <boost/algorithm/string.hpp>
 #include <set>
 
-#include "pathadaptor.hpp"
+#include "util/pathadaptor.hpp"
+#include "util/bigfileio.h"
 #include "decode/decode.h"
 #include "raster/gdal_traits.hpp"
 #include "raster/gdalex.hpp"
-#include "pos.h"
-#include "bigfileio.h"
+#include "geometry/pos.h"
 
 DEFINE_string(o,"", "output directory");
 DEFINE_int32(t,0x00C01509, "header tag");//0x0915C000

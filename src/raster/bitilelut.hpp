@@ -5,7 +5,7 @@
 
 #include "raster/operator.h"
 #include "raster/detail/lookup.hpp"
-#include "TileManager.hpp"
+#include "util/TileManager.hpp"
 
 namespace xlingsky {
 namespace raster {
@@ -29,6 +29,12 @@ public:
       : _src_minimum(src_min), _src_unbounded_maximum(src_umax),
         _dst_minimum(dst_min), _dst_maximum(dst_umax) {};
   virtual ~Creator() {}
+  
+  SrcType src_minimum() const { return _src_minimum; }
+  SrcType src_unbounded_maximum() const { return _src_unbounded_maximum;}
+  DstType dst_minimum() const { return _dst_minimum; }
+  DstType dst_maximum() const { return _dst_maximum; }
+  
   void Destroy(LookupPtr p) {
     if(p!=nullptr) delete p;
   }
@@ -211,6 +217,54 @@ class WallisCreator : public Creator<_SrcType, _DstType> {
   }
 };
 
+template <class Config, typename _SrcType, typename _DstType>
+Creator<_SrcType, _DstType>* Create(const Config& config){
+  float src_min = config. template get<float>("src_min", 7);
+  float src_umax = config. template get<float>("src_umax", 4000);
+  float dst_min = config. template get<float>("dst_min", 0);
+  float dst_max = config. template get<float>("dst_max", 255);
+  std::string m = config.template get<std::string>("mode", "WALLIS|MINMAX|CUT");
+  std::transform(m.begin(), m.end(), m.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  int mode = 0;
+  if (m.find("minmax") != std::string::npos)
+    mode |= 0x01;
+  if (m.find("cut") != std::string::npos)
+    mode |= 0x02;
+  if (m.find("hist") != std::string::npos)
+    mode |= 0x04;
+  if (m.find("wallis") != std::string::npos)
+    mode |= 0x08;
+
+  if ((mode & 0x02) || (mode & 0x04) || (mode & 0x08)) {
+    float src_step = config. template get<float>("src_step", 1);
+    if (mode & 0x08) {
+      float dst_mean = config. template get<float>("dst_mean", 127);
+      float dst_std = config. template get<float>("dst_std", 70); // 40-70
+      float c = config. template get<float>("c", 0.8);            // 0-1
+      float b = config. template get<float>("b", 0.9);            // 0-1
+      auto *l = new WallisCreator<_SrcType, _DstType>( src_step, src_min, src_umax, dst_min, dst_max);
+      l->Setup(dst_mean, dst_std, c, b);
+      return l;
+    } else {
+      float cut_ratio_lower = config. template get<float>("cut_lower", 0.002);
+      float cut_ratio_upper = config. template get<float>("cut_upper", 0.002);
+      if (mode & 0x02) {
+        auto *l = new LinearCreator<_SrcType, _DstType>( src_step, src_min, src_umax, dst_min, dst_max);
+        l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+        return l;
+      } else {
+        float hist_clip = config. template get<float>("hist_clip", 10);
+        auto *l = new ClaheCreator<_SrcType, _DstType>( hist_clip, src_step, src_min, src_umax, dst_min, dst_max);
+        l->set_cut_ratio(cut_ratio_lower, cut_ratio_upper);
+        return l;
+      }
+    }
+  } else {
+    return new Creator<_SrcType, _DstType>(src_min, src_umax, dst_min, dst_max);
+  }
+}
+
 };
 
 class BiTileLut : public FrameIterator {
@@ -274,6 +328,34 @@ public:
       _lookup_creator = nullptr;
     }
   }
+  // template<class Config>
+  // bool load_config(const Config& config){
+  //     int resample_col_step = v.second.get<float>("resample_col_step", 3);
+  //     int resample_row_step = v.second.get<float>("resample_row_step", 3);
+  //     unsigned int tile_cols = v.second.get<unsigned int>("tile_cols", 0);
+  //     unsigned int tile_rows = v.second.get<unsigned int>("tile_rows", 0);
+  //     unsigned int grid_x = v.second.get<unsigned int>("grid_x", 8);
+  //     unsigned int grid_y = v.second.get<unsigned int>("grid_y", 8);
+  //     if (tile_cols == 0) {
+  //       if (grid_x == 0)
+  //         tile_cols = 512;
+  //       else {
+  //         tile_cols = src_size[store_prior[0]] / grid_x;
+  //         if (tile_cols < 1)
+  //           tile_cols = 1;
+  //       }
+  //     }
+  //     if (tile_rows == 0) {
+  //       if (grid_y == 0)
+  //         tile_rows = 512;
+  //       else {
+  //         tile_rows = src_size[store_prior[1]] / grid_y;
+  //         if (tile_rows < 1)
+  //           tile_rows = 1;
+  //       }
+  //     }
+  // }
+
   void set_lut_creator(LutCreatorPtr lookup_creator){
     if (_lookup_creator) {
       delete _lookup_creator;
@@ -368,6 +450,11 @@ typedef lookup::WallisCreator<BiTileLut::SrcType,BiTileLut::DstType> LutWallis;
 typedef lookup::ClaheCreator<BiTileLut::SrcType,BiTileLut::DstType>  LutClahe;
 typedef lookup::LinearCreator<BiTileLut::SrcType,BiTileLut::DstType> LutLinear;
 typedef lookup::Creator<BiTileLut::SrcType,BiTileLut::DstType> LutCreator;
+
+template<class Config>
+LutCreator* LutCreate(const Config& config) {
+  return lookup::Create<Config, BiTileLut::SrcType, BiTileLut::DstType>(config);
+}
 
 };  // namespace raster
 };  // namespace xlingsky

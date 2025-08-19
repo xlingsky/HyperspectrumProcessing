@@ -4,16 +4,14 @@
 #include <assert.h>
 #include <vector>
 #include <sstream>
-#include <string>
-// #include <boost/filesystem.hpp>
 
-#include "TileManager.hpp"
-#include "InterpolatorAdaptor.hpp"
+#include "util/TileManager.hpp"
+#include "util/InterpolatorAdaptor.hpp"
+#include "util/gdalex.hpp"
+#include "util/gdal_traits.hpp"
 
 #include "raster/operator.h"
 #include "raster/detail/inpaint.hpp"
-#include "raster/gdalex.hpp"
-#include "raster/gdal_traits.hpp"
 #include "raster/common.hpp"
 
 //#define DEBUG
@@ -166,12 +164,16 @@ class PixelCorrection : public FrameIterator {
 #endif
 
  public:
-  PixelCorrection(int cols, int rows, DataType dst_min, DataType dst_max)
+  PixelCorrection(int cols, int rows, DataType dst_min = 0, DataType dst_max = 255)
       : _cols(cols), _rows(rows), _dst_minimum(dst_min), _dst_maximum(dst_max),
 #ifdef DEFECTIVEPIXEL_COUNTING
     _list(rows),
 #endif
     _threshold(10) {}
+  void set_destination_range(DataType min, DataType max) {
+    _dst_minimum = min;
+    _dst_maximum = max;
+  }
   virtual DataType correct(int, DataType, int) = 0;
 
   bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) override {
@@ -293,8 +295,7 @@ class NonUniformCorrection : public PixelCorrection {
   DataType* _b;
 
  public:
-  NonUniformCorrection(int cols, int rows, DataType dst_min, DataType dst_max)
-      : PixelCorrection(cols, rows, dst_min, dst_max) {
+  NonUniformCorrection(int cols, int rows) : PixelCorrection(cols, rows) {
     size_t sz = (size_t)cols * rows;
     _a = new DataType[sz];
     _b = new DataType[sz];
@@ -302,6 +303,28 @@ class NonUniformCorrection : public PixelCorrection {
   ~NonUniformCorrection() {
     if (_a) delete[] _a;
     if (_b) delete[] _b;
+  }
+  template <class Config>
+  bool load_config(const Config& config) {
+    std::string a, b;
+    try {
+      a = config.filepath("a").string();
+      b = config.filepath("b").string();
+    } catch (const boost::property_tree::ptree_error &e) {
+      throw std::runtime_error("NonUniformCorrection: " +
+                               std::string(e.what()));
+      return false;
+    }
+    if (a.empty() || b.empty()){
+      throw std::runtime_error("NonUniformCorrection: a or b is empty");
+      return false;
+    }
+    float dst_min =
+        config.template get<float>("dst_min", (std::numeric_limits<float>::min)());
+    float dst_max =
+        config.template get<float>("dst_max", (std::numeric_limits<float>::max)());
+    set_destination_range(dst_min, dst_max);
+    return load(a.c_str(), b.c_str());
   }
   bool load(const char* a, const char* b) {
     if (::xlingsky::raster::radiometric::load(a, (size_t)cols() * rows(), _a) &&
@@ -323,6 +346,9 @@ class DefectivePixelCorrection : public Operator {
   virtual cv::Mat begin(int b, Mask mask) = 0;
   virtual void end(int b, Mask mask) {}
   virtual void exit(Mask mask) = 0;
+
+  template<class Config>
+  static DefectivePixelCorrection* Create(const Config& config, int src_win[3], int store_prior[3]);
 
   bool operator()(void* data, int imoff[3], int size[3], int space[3],
                   int prior[3]) override {
@@ -509,6 +535,37 @@ class DefectivePixelCorrectionV2 : public DefectivePixelCorrection {
     delete mm;
   }
 };
+
+template<class Config>
+DefectivePixelCorrection* DefectivePixelCorrection::Create(const Config& config, int src_size[3], int store_prior[3]){
+  xlingsky::raster::radiometric::DefectivePixelCorrectionV2 *p1 =
+      new xlingsky::raster::radiometric::DefectivePixelCorrectionV2;
+  if (p1->load(config.filepath("file").string().c_str(), src_size[0], src_size[1], src_size[2])) {
+    return p1;
+  } 
+  delete p1;
+  xlingsky::raster::radiometric::DefectivePixelCorrectionV1 *p2 =
+      new xlingsky::raster::radiometric::DefectivePixelCorrectionV1;
+  int pt[3];
+  {
+    std::string prior = config.template get<std::string>("dim_prior", "");
+    std::vector<std::string> result;
+    boost::split(result, prior, boost::is_any_of(","));
+    if (result.size() == 3) {
+      pt[0] = std::stoi(result[0]);
+      pt[1] = std::stoi(result[1]);
+      pt[2] = std::stoi(result[2]);
+    } else {
+      memcpy(pt, store_prior, sizeof(int) * 3);
+    }
+  }
+  if (!p2->load( config.filepath("file").string().c_str(), src_size[pt[0]],
+                src_size[pt[1]], pt[2])) {
+    delete p2;
+    return nullptr;
+  }
+  return p2;
+}
 
 class MeanStdCalculator : public FrameIterator {
  private:
@@ -819,6 +876,28 @@ class NucCalculator : public FrameIterator{
     if(xmlpath) strcpy(_xml_path, xmlpath);
     if(hi_path) strcpy(_hi_path, hi_path);
     if(lo_path) strcpy(_lo_path, lo_path);
+  }
+  template<class Config>
+  bool load_config(const Config& config){
+      _cut_ratio_dark = config. template get<float>("cut_dark", 0.03);
+      _cut_ratio_bright = config. template get<float>("cut_bright", 0.1);
+      _value_ratio_threshold_dark = config. template get<float>("threshold_dark", 0.03);
+      _value_ratio_threshold_bright = config. template get<float>("threshold_bright", 0.03);
+      _sample_maxnum_dark = config. template get<int>("sample_dark", 40);
+      _sample_maxnum_bright = config. template get<int>("sample_bright", 40);
+      _line_tile_size = config. template get<int>("tile_size", (std::numeric_limits<int>::max)());
+      _line_tile_overlap = config. template get<int>("tile_overlap", -1);
+      bool preferred_a = config. template get<bool>("a", true);
+      _mode = preferred_a?xlingsky::raster::radiometric::NucCalculator::SCALE:xlingsky::raster::radiometric::NucCalculator::OFFSET;
+      std::string t = config. template get<std::string>("interp", "pchip");
+      if(t=="makima")
+        _interp_type = xlingsky::raster::radiometric::NucCalculator::MAKIMA;
+      else if(t=="barycentric")
+        _interp_type = xlingsky::raster::radiometric::NucCalculator::BARYCENTRIC;
+      else
+        _interp_type = xlingsky::raster::radiometric::NucCalculator::PCHIP;
+      if(_line_tile_overlap<0) _line_tile_overlap = _line_tile_size/2;
+      return true;
   }
   bool operator()(int b, int, int, void *data, int cols, int rows) override {
     DataType* pdata = (DataType*)data;

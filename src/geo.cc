@@ -1,6 +1,6 @@
-#include "pos.h"
+#include "geometry/pos.h"
 
-#include "pathadaptor.hpp"
+#include "util/pathadaptor.hpp"
 
 int main(int argc, char *argv[]) {
   boost::filesystem::path path(argv[1]);

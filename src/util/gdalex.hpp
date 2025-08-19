@@ -11,8 +11,8 @@ inline char* strlwr( char *str ){
 
 inline const char* GetGDALDescription(const char* lpstrExt, const char* default_ret)
 {
-  static const char* strExt[] = { "tif", "tiff", "bmp", "jpg", "png", "img", "bt", "ecw", "fits", "gif", "hdf", "hdr","pix", "dat"};
-  static const char* strDescrip[] = { "GTiff","GTiff", "BMP", "JPEG","PNG", "HFA", "BT", "ECW", "FITS", "GIF", "HDF4", "EHdr","PCIDSK", "ENVI" };
+  static const char* strExt[] = { "tif", "tiff", "mem", "bmp", "jpg", "png", "img", "bt", "ecw", "fits", "gif", "hdf", "hdr","pix", "dat"};
+  static const char* strDescrip[] = { "GTiff","GTiff", "MEM", "BMP", "JPEG","PNG", "HFA", "BT", "ECW", "FITS", "GIF", "HDF4", "EHdr","PCIDSK", "ENVI" };
 
   char suffix[10];	if (*lpstrExt == '.') strcpy(suffix, lpstrExt + 1); else strcpy(suffix, lpstrExt);
   strlwr(suffix);
@@ -58,7 +58,7 @@ inline std::pair<double, double> GetDataTypeMinMax(GDALDataType type){
 inline GDALDataset* GDALCreate(const char* filepath, int cols, int rows, int bands, GDALDataType type){
   GDALDataset* dataset;
   const char* ext = strrchr(filepath,'.');
-  if(ext==nullptr) ext = "tif";
+  if(ext==nullptr) ext = "mem";
   GDALDriver *poDriver;
   poDriver = GetGDALDriverManager()->GetDriverByName(GetGDALDescription(ext,"ENVI"));
   dataset = poDriver->Create(filepath, cols, rows, bands, type, nullptr);

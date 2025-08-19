@@ -2,7 +2,9 @@
 #define XLINGSKY_RASTER_SPECTRUM_INTERP_HPP
 
 #include "raster/operator.h"
-#include "InterpolatorAdaptor.hpp"
+#include "util/InterpolatorAdaptor.hpp"
+
+#include <boost/algorithm/string.hpp>
 
 namespace xlingsky {
 
@@ -32,10 +34,60 @@ class Interpolator : public Operator {
 
  public:
   Interpolator(int num_lines, std::vector<double>& wl_old, int num_samples_old, std::vector<double>& wl_new, int num_samples_new)
-      : _type(PCHIP) {
+      : _type(PCHIP), _num_lines(num_lines), _num_samples_new(num_samples_new), _num_samples_old(num_samples_old){
     SetWaveLength(num_lines, wl_old, num_samples_old,  wl_new, num_samples_new);
   }
+  Interpolator(int num_lines, int num_samples_old) : _num_lines(num_lines), _num_samples_old(num_samples_old), _type(PCHIP) {}
+
   virtual ~Interpolator() {}
+
+  template<class Config>
+  bool load_config(const Config& config) {
+    std::vector<double> wl_old, wl_new;
+    std::string w0 = config.template get<std::string>("wl0");
+    std::string w1 = config.template get<std::string>("wl1");
+
+    std::vector<std::string> result;
+    boost::split(result, w0, boost::is_any_of(", ;"));
+    for (auto &r : result)
+      wl_old.push_back(std::stod(r));
+    boost::split(result, w1, boost::is_any_of(", ;"));
+    for (auto &r : result)
+      wl_new.push_back(std::stod(r));
+
+    bool flag = false;
+    if (wl_old.size() == _num_samples_old) {
+      _num_samples_new = wl_new.size();
+      flag = true;
+    } else if (wl_old.size() == (size_t)_num_samples_old * _num_lines) {
+      _num_samples_new = wl_new.size() / _num_lines;
+      if (_num_samples_new > 0)
+        flag = true;
+    }
+    if (!flag) {
+      throw std::runtime_error("Interpolator: interp wl length MISMATCH");
+      return false;
+    }
+
+    std::string t = config.template get<std::string>("type", "pchip");
+    if (t == "spline_cubic")
+      _type = xlingsky::raster::spectrum::Interpolator::BSPLINE_CUBIC;
+    else if (t == "spline_quintic")
+      _type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUINTIC;
+    else if (t == "spline_quadratic")
+      _type = xlingsky::raster::spectrum::Interpolator::BSPLINE_QUADRATIC;
+    else if (t == "makima")
+      _type = xlingsky::raster::spectrum::Interpolator::MAKIMA;
+    else if (t == "barycentric")
+      _type = xlingsky::raster::spectrum::Interpolator::BARYCENTRIC;
+    else
+      _type = xlingsky::raster::spectrum::Interpolator::PCHIP;
+    
+    return SetWaveLength(_num_lines, wl_old, _num_samples_old, wl_new, _num_samples_new);
+  }
+
+  int num_samples_new() const { return _num_samples_new; }
+
   void SetInterpType(InterpType type) { _type = type; }
   bool SetWaveLength(int num_lines, std::vector<double>& wl_old, int num_samples_old, std::vector<double>& wl_new, int num_samples_new) {
     if(wl_old.size() >= (size_t)num_samples_old*num_lines){
@@ -52,9 +104,6 @@ class Interpolator : public Operator {
         _wl_new.insert(_wl_new.end(), wl_new.begin(), wl_new.begin()+num_samples_new);
     }else return false;
 
-    _num_lines = num_lines;
-    _num_samples_new = num_samples_new;
-    _num_samples_old = num_samples_old;
     return true;
   }
   bool operator()(void* data, int imoff[3], int size[3], int space[3],

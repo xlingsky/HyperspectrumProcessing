@@ -90,6 +90,22 @@ class FrameIterator : public OperatorEx {
   virtual bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) = 0;
 };
 
+class FrameParallel : public OperatorEx {
+ public:
+  bool operator()(void* data, int imoff[3], int size[3], int space[3],
+                  int prior[3]) override {
+    bool ret = true;
+#ifdef _USE_OPENMP
+#pragma omp parallel for
+#endif
+    for (int r = 0; r < size[prior[2]]; ++r)
+      if (this->operator()(r+imoff[prior[2]], imoff[prior[0]], imoff[prior[1]], (char*)data + (size_t)space[prior[2]] * r,
+                           size[prior[0]], size[prior[1]])) {
+      }
+    return ret;
+  }
+  virtual bool operator()(int b, int xoff, int yoff, void* data, int cols, int rows) = 0;
+};
 
 };
 

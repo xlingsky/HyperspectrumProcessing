@@ -7,6 +7,6 @@
   <dst_max>255</dst_max>
   <resample_col_step>5</resample_col_step>
   <resample_row_step>5</resample_row_step>
-  <mode>minmax|clip|hist</mode>
+  <mode>tile|hist|global</mode>
 </task>
 </HSP>

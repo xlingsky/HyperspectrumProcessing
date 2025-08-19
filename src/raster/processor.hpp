@@ -2,11 +2,10 @@
 #define XLINGSKY_RASTER_PROCESSOR_HPP
 
 #include "raster/operator.h"
-#include "TileManager.hpp"
+#include "util/TileManager.hpp"
 
 #include <gdal_priv.h>
 #include <numeric>
-#include "gdal_traits.hpp"
 
 #ifdef _LOGGING
 #include <glog/logging.h>

@@ -29,24 +29,25 @@ endif()
 
 set(raster
   src/hsp.cc
+  src/raster/detail/lsd.c
   )
 
 set(geo
   src/geo.cc
-  src/pos.cc
-  src/lx_geometry_rpc.cc
-  src/bigfileio.cc
+  src/geometry/pos.cc
+  src/geometry/lx_geometry_rpc.cc
+  src/util/bigfileio.cc
   )
 
 set(extractor
   src/extractor.cc
   src/decode/decode.cc
-  src/bigfileio.cc
-  src/pos.cc
+  src/util/bigfileio.cc
+  src/geometry/pos.cc
   )
 
 add_executable(hsp_raster ${raster})
-target_link_libraries(hsp_raster PRIVATE GDAL::GDAL gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core ${OpenMP_LIBS} )
+target_link_libraries(hsp_raster PRIVATE GDAL::GDAL gflags glog::glog ${Boost_LIBRARIES} opencv_photo opencv_core opencv_imgcodecs ${OpenMP_LIBS} )
 
 add_executable(hsp_geo ${geo})
 target_link_libraries(hsp_geo PRIVATE GDAL::GDAL ${Boost_LIBRARIES})

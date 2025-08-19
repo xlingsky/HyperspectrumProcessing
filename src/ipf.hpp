@@ -1,7 +1,7 @@
 #ifndef XLINGSKY_IMAGE_PROCESS_FRAMEWORK_HPP
 #define XLINGSKY_IMAGE_PROCESS_FRAMEWORK_HPP
 
-#include "TileManager.hpp"
+#include "util/TileManager.hpp"
 #ifdef _LOGGING
 #include <glog/logging.h>
 #define _LOG_LEVEL_IPF 1
