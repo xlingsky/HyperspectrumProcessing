@@ -1,7 +1,0 @@
-<HSP>
-<dim_prior>1,0,2</dim_prior>
-<task name="nuc">
-<cut_lower>0.1</cut_lower>
-<cut_upper>0.1</cut_upper>
-</task>
-</HSP>

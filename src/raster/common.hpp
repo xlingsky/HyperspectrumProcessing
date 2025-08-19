@@ -21,23 +21,6 @@ namespace raster{
 
 namespace common{
 
-class Sort : public FrameIterator {
- public:
-  typedef float DataType;
-  Sort(){}
-  bool operator()(int , int , int, void* data, int cols, int rows) override{
-    DataType* pdata = (DataType*)data;
-#ifdef _USE_OPENMP
-#pragma omp parallel for
-#endif
-    for(int r=0; r<rows; ++r){
-      auto t = pdata+r*cols;
-      std::sort( t, t + cols);
-    }
-    return true;
-  }
-};
-
 template<typename T>
 bool load(const char* filepath, int cols, int rows, T* data){
     if (IsRasterDataset(filepath)) {
@@ -74,46 +57,6 @@ bool load(const char* filepath, int cols, int rows, T* data){
     }
     return true;
 }
-
-class Extend : public FrameIterator{
- protected:
-  typedef float DataType;
-  DataType* _data;
-  bool _own_data;
-  void reset(){
-    if(_own_data && _data)
-    {
-      delete[] _data;
-      _data = nullptr;
-      _own_data = false;
-    }
-  }
- public:
-  Extend( DataType* data = nullptr) : _data(data), _own_data(false) {
-  }
-  ~Extend(){
-    reset();
-  }
-  bool load(const char* filepath, int cols, int rows) {
-    DataType* d = new DataType[(size_t)cols*rows];
-    if (!xlingsky::raster::common::load(filepath, cols, rows, d)){
-#ifdef _LOGGING
-      VLOG(_LOG_LEVEL_COMMON) << "[Extend] size not match " << filepath;
-#endif
-      delete[] d;
-      return false;
-    }
-    reset();
-    _data = d;
-    _own_data = true;
-    return true;
-  }
-  bool operator()(int , int , int, void* data, int cols, int rows) override{
-    DataType* pdata = (DataType*)data;
-    memcpy(pdata, _data, sizeof(DataType)*cols*rows);
-    return true;
-  }
-};
 
 class Minus : public Operator {
   private:

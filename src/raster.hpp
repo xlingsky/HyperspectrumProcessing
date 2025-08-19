@@ -2,11 +2,10 @@
 #define XLINGSKY_RASTER_HPP
 
 #include "raster/common.hpp"
-#include "raster/filter.hpp"
 #include "raster/radiometric.hpp"
-#include "raster/SpectrumInterp.hpp"
 #include "raster/processor.hpp"
-#include "raster/enhancement.hpp"
 #include "raster/extractor.hpp"
+#include "raster/anomalydetection.hpp"
+#include "raster/io.hpp"
 
 #endif

@@ -1,6 +1,0 @@
-<HSP>
-<dim_prior>0,2,1</dim_prior>
-<task name="extend">
-  <file>../data/863/vnir_badpixels.txt</file>
-</task>
-</HSP>
