@@ -5,6 +5,7 @@
 #include <cmath> 
 #include <fstream>
 #include <sstream>
+#include <algorithm>
 
 namespace s2r {
   namespace xsofa {
@@ -114,7 +115,7 @@ int getTAIUTCDiff(int mjd) {
         return 19; 
     }
 
-    auto it = upper_bound(leapSeconds.begin(), leapSeconds.end(), mjd,
+    auto it = std::upper_bound(leapSeconds.begin(), leapSeconds.end(), mjd,
         [](int mjd, const std::pair<int, int>& p) { return mjd < p.first; });
 
     if (it == leapSeconds.begin()) {
