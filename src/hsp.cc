@@ -7,6 +7,7 @@
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/property_tree/xml_parser.hpp>
+#include <boost/property_tree/json_parser.hpp>
 #include <boost/foreach.hpp>
 #include <boost/algorithm/string.hpp>
 
@@ -55,7 +56,7 @@ int main(int argc, char* argv[]){
   std::string usage("This program processes temporal raw data. Usage:\n");
   {
     std::string name = boost::filesystem::path(argv[0]).filename().string();
-    usage = usage + name + " -task <task xml file> <image file>\n";
+    usage = usage + name + " -task <task file> <image file>\n";
   }
   gflags::SetUsageMessage(usage);
   gflags::SetVersionString("1.4");
@@ -73,7 +74,11 @@ int main(int argc, char* argv[]){
   boost::filesystem::path path(argv[1]);
   boost::property_tree::ptree tree;
   try {
-    boost::property_tree::read_xml(FLAGS_task, tree, boost::property_tree::xml_parser::trim_whitespace);
+    if (path.extension() == ".xml" || path.extension() == ".XML" ){
+      boost::property_tree::read_xml(FLAGS_task, tree, boost::property_tree::xml_parser::trim_whitespace);
+    }else{
+      boost::property_tree::read_json(FLAGS_task, tree);
+    }
   }
   catch (const boost::property_tree::ptree_error& e) {
     LOG(ERROR) << e.what();

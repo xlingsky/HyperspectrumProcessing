@@ -17,8 +17,6 @@
 
 #if defined(DEBUG) || defined(_DEBUG)
 #include <boost/dll/runtime_symbol_info.hpp>
-#include "raster/gdalex.hpp"
-#include "raster/gdal_traits.hpp"
 #endif
 
 #ifdef _LOGGING

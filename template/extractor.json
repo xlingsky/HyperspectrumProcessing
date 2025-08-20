@@ -1,0 +1,29 @@
+{
+  "HSP": {
+    "dim_prior": "0,1,2",
+    "task": [
+      {
+        "<xmlattr>": {
+          "name": "removal"
+        },
+        "interval": "10"
+      },
+      {
+        "<xmlattr>": {
+          "name": "anomaly"
+        },
+        "ksize": "10"
+      },
+      {
+        "<xmlattr>": {
+          "name": "extractor"
+        },
+        "type": "peak",
+        "length_min": "4",
+        "length_max": "20",
+        "dimension": "5 5",
+        "matrix": "0.1 0.1 0.1 0.1 0.1 0.1   1   1   1 0.1 0.1   1 40   1 0.1 0.1   1   1   1 0.1 0.1 0.1 0.1 0.1 0.1"
+      }
+    ]
+  }
+}

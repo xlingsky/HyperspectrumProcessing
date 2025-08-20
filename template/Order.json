@@ -1,0 +1,41 @@
+{"InterfaceFile":
+{"FileHeader":
+{"MessageType":"Comm_L1",
+"MessageID":"56ba3f89-2e56-4b47-85a3-4ee25031b72c",
+"Originator":"协同调度分系统",
+"IPAddress":"127.0.0.1",
+"Recipient":"数据处理",
+"CreationTime":1755051983760,
+"SatelliteID":"GF7"},
+"FileBody":
+{"WorkDir":"D:\\pythoncode\\803\\output2",
+"OperatorName":"sys",
+"Priority":"0",
+"UserType":"sys",
+"InputFile":"D:\\pythoncode\\803\\input",
+"LocalWorkDir":"/tmp/GF07",
+"StartFrame": "10001.tif",
+"EndFrame": "10099.tif"
+},
+"Parameters":
+{"BackgroundFrames":"15",
+"TargetMaximumSize":"",
+"MaxMissingFrames":"10",
+"MinDetectionFrames":"10",
+"MaxSpeed":"800",
+"MinSpeed":"200",
+"MinAltitude":"",
+"MaxAltitude":"",
+"SearchRange":"",
+"TraFusionIntel":"",
+"FeatureLibrary":"",
+"TargetRecogIntel":""
+},
+"Evaluation":
+{"RealTrajectory":"",
+ "UnvalTrajectory":""
+},
+"FlowType":"",
+"FlowPointSequence":""
+}
+}
