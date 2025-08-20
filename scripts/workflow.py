@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import xml.etree.ElementTree as ET
+import time
 
 def xml_to_dict(element : ET):
     result = {}
@@ -34,7 +35,29 @@ def xml_string_to_json(xml_string):
 
 # def json_to_tasks(json : str, taskdir : os.path):
 
-# def object_detection():
+def object_detection():
+    time.sleep(10000)
+
+def object_tracking():
+    time.sleep(10000)
+
+def trajectory_generation():
+    time.sleep(10000)
+
+def trajectory_fusion():
+    time.sleep(10000)
+
+def object_recognition():
+    time.sleep(10000)
+
+def trajectory_prediction():
+    time.sleep(10000)
+
+def evaluation():
+    time.sleep(10000)
+
+def realtime_processing():
+    time.sleep(10000)
 
 if __name__ == "__main__":
     import sys
