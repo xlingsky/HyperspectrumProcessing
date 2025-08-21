@@ -73,11 +73,13 @@ int main(int argc, char* argv[]){
 
   boost::filesystem::path path(argv[1]);
   boost::property_tree::ptree tree;
+  bool flag_xml = true;
   try {
-    if (path.extension() == ".xml" || path.extension() == ".XML" ){
+    if ( FLAGS_task.rfind(".xml") != std::string::npos || FLAGS_task.rfind(".XML") != std::string::npos ){
       boost::property_tree::read_xml(FLAGS_task, tree, boost::property_tree::xml_parser::trim_whitespace);
     }else{
       boost::property_tree::read_json(FLAGS_task, tree);
+      flag_xml = false;
     }
   }
   catch (const boost::property_tree::ptree_error& e) {
@@ -169,10 +171,11 @@ int main(int argc, char* argv[]){
   std::vector<std::string> post_tasks;
   int retcode = 0;
 
-  BOOST_FOREACH(boost::property_tree::ptree::value_type & v, tree.get_child("HSP")) {
-    if (v.first != "task") continue;
-    auto name = v.second.get_child("<xmlattr>.name").get_value<std::string>();
-    xlingsky::util::config config( v.second, taskpath);
+  boost::property_tree::ptree tasks = tree.get_child("HSP.task");
+  for (const auto& task : tasks) {
+    auto& v = task.second;
+    auto name = v.get<std::string>( flag_xml?"<xmlattr>.name":"name");
+    xlingsky::util::config config( v, taskpath);
     if (name == "dpc") {
       xlingsky::raster::radiometric::DefectivePixelCorrection* op = xlingsky::raster::radiometric::DefectivePixelCorrection::Create(config, src_size, store_prior);
       if (op==nullptr) {
@@ -184,7 +187,7 @@ int main(int argc, char* argv[]){
       boutput = 1;
     }
     else if(name == "statistic"){
-      std::string method = v.second.get<std::string>("method", "mean");
+      std::string method = v.get<std::string>("method", "mean");
       boost::filesystem::path dstpath;
       if(FLAGS_o.empty()){
         dstpath = path;
@@ -198,16 +201,16 @@ int main(int argc, char* argv[]){
       dstpath += "_"+method+".txt";
       xlingsky::raster::FrameIterator* op = nullptr;
       if(method=="mean"){
-        float cut_ratio_lower = v.second.get<float>("cut_lower", 0);
-        float cut_ratio_upper = v.second.get<float>("cut_upper", 0);
+        float cut_ratio_lower = v.get<float>("cut_lower", 0);
+        float cut_ratio_upper = v.get<float>("cut_upper", 0);
         xlingsky::raster::radiometric::MeanStdCalculator* p = new xlingsky::raster::radiometric::MeanStdCalculator(src_size[store_prior[1]], cut_ratio_lower, cut_ratio_upper);
-        bool nuc = v.second.get<bool>("nuc", false);
+        bool nuc = v.get<bool>("nuc", false);
         if(nuc){
           boost::filesystem::path xmlpath = dstpath;
           xmlpath.replace_extension(".xml");
           p->SetXmlPath(xmlpath.string().c_str());
           p->SetDimOrder(store_prior);
-          bool apply = v.second.get<bool>("nuc.<xmlattr>.apply", true);
+          bool apply = v.get<bool>("nuc.<xmlattr>.apply", true);
           if(apply)
           {
             std::string cmd(argv[0]);
@@ -228,7 +231,7 @@ int main(int argc, char* argv[]){
       if(nodata.size()>0) op->AddNoDataValue(nodata.begin(), nodata.end());
       ops->Add(op);
     } else if(name == "extractor"){
-      std::string type = v.second.get<std::string>("type", "peak");
+      std::string type = v.get<std::string>("type", "peak");
       boost::filesystem::path dstpath;
       if(FLAGS_o.empty()){
         dstpath = path;
@@ -243,7 +246,7 @@ int main(int argc, char* argv[]){
       xlingsky::raster::Operator* op = nullptr;
       if(type=="peak"){
         xlingsky::raster::extractor::PeakDetection* p = 
-        new xlingsky::raster::extractor::PeakDetection(src_size[store_prior[2]], v.second);
+        new xlingsky::raster::extractor::PeakDetection(src_size[store_prior[2]], v);
         std::string pointpath = dstpath.string() + "_points.txt";
         std::string linepath = dstpath.string() + "_lines.txt";
         p->SetFilePath(pointpath.c_str(), linepath.c_str());
@@ -252,7 +255,7 @@ int main(int argc, char* argv[]){
       } else{
         dstpath += ".txt";
         auto *p = new xlingsky::raster::extractor::LSDExtractor(
-            src_size[store_prior[2]], v.second);
+            src_size[store_prior[2]], v);
         p->SetFilePath(dstpath.string().c_str());
         op = p;
       }
@@ -269,7 +272,7 @@ int main(int argc, char* argv[]){
       }
 
       std::string dstpath = "in_memory";
-      bool removal = v.second.get<bool>("removal", true);
+      bool removal = v.get<bool>("removal", true);
       if (!removal) {
         boost::filesystem::path temp;
         if (FLAGS_o.empty()) {

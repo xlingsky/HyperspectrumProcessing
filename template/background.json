@@ -1,0 +1,10 @@
+{
+  "HSP": {
+    "dim_prior": "0,1,2",
+    "task": {
+      "name": "removal",
+      "background": "/Users/xlingsky/Desktop/demo/added_background.tif",
+      "interval": "10"
+    }
+  }
+}

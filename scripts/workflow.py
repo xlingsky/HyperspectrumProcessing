@@ -8,7 +8,7 @@ def xml_to_dict(element : ET):
     result = {}
     
     if element.attrib:
-        result['<xmlattr>'] = element.attrib
+        result = element.attrib
         
     if element.text and element.text.strip():
         result = element.text.strip()

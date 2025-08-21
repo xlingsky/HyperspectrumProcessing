@@ -1,8 +1,0 @@
-<HSP>
-<min_frame_number>15</min_frame_number>
-<min_speed>0.1</min_speed>
-<max_acceleration>0.6</max_acceleration>
-<kalman>
-<search_radius>2.5</search_radius>
-</kalman>
-</HSP>

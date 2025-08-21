@@ -1,14 +1,12 @@
 from flask import Flask, request, jsonify
 from enum import Enum
-from task import Task
-import os
+from task import Task, Status
 from workflow import object_detection, object_tracking, trajectory_generation, trajectory_fusion, object_recognition, trajectory_prediction, evaluation, realtime_processing
+from websocketserver import WebSocketServer
+import asyncio
 
 app = Flask("HSP")
-
-class Status(Enum):
-    SUCCESS=200
-    ERROR=500
+server = WebSocketServer()
 
 class Action(Enum):
     START = "run"
@@ -30,6 +28,11 @@ algorithm = {
 
 tasklist = dict()
 
+async def main():
+    await server.run_server('192.168.2.200', 90)
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+
 @app.route('/hsp/service', methods=['POST'])
 def message_processing():
     global tasklist
@@ -37,7 +40,7 @@ def message_processing():
     hdr = {data.get('JobID'), data.get('TaskID'), data.get('Action')}
 
     if not hdr[0] or not hdr[1] or not hdr[2]:
-        return jsonify({"status":Status.ERROR, "message": "缺少信息头信息", "result":{}})
+        return jsonify({"status":Status.ERROR.value, "message": "缺少信息头信息", "result":{}})
 
     action = Action(hdr[2])
     job = tasklist.get(hdr[0])
@@ -46,45 +49,35 @@ def message_processing():
         job = tasklist[hdr[0]]
         task = None
         if action != Action.START:
-            return jsonify({"status":Status.ERROR, "message": "节点未运行", "result":{}})
+            return jsonify({"status":Status.ERROR.value, "message": "节点未运行", "result":{}})
     else:
         task = next(reversed(job.items()))
-        if task[0] != taskid:
-            return jsonify({"status":Status.ERROR, "message": "节点未运行", "result":{}})
+        if task[0] != taskid and not task[1].finished():
+            return jsonify({"status":Status.ERROR.value, "message": "上个节点未完成", "result":{}})
 
     taskid = hdr[1]
 
     if action == Action.START:
-        if task is not None:
-            if task[0]!=taskid:
-                if not task[1].finished():
-                    return jsonify({"status":Status.ERROR, "message": "上个节点未完成", "result":{}})
-            else:
-                if task[1].resume():
-                    return jsonify({"status":Status.SUCCESS, "message": "节点重启成功", "result":{}})
-                else:
-                    return jsonify({"status":Status.ERROR, "message": "节点重启失败", "result":{}})
+        if task is not None and task[0] == taskid:
+            if not task[1].resume():
+                return jsonify({"status": Status.ERROR.value, "message": "节点重启失败", "result": {}})
         task = Task()
-        if task.start(algorithm[taskid], hdr[0], hdr[1]):
+        if task.start(algorithm[taskid], hdr[0], hdr[1], server):
             job[taskid] = task
-            return jsonify({"status":Status.SUCCESS, "message": "节点启动成功", "result":{}})
+            return True
         else:
-            return jsonify({"status":Status.ERROR, "message": "节点启动失败", "result":{}})
+            return jsonify({"status":Status.ERROR.value, "message": "节点启动失败", "result":{}})
     elif action == Action.PAUSE:
         assert(task is not None)
-        if task[1].pause():
-            return jsonify({"status":Status.SUCCESS, "message": "节点暂停成功", "result":{}})
-        else:
-            return jsonify({"status":Status.ERROR, "message": "节点暂停失败", "result":{}})
+        if not task[1].pause():
+            return jsonify({"status":Status.ERROR.value, "message": "节点暂停失败", "result":{}})
     elif action == Action.KILL:
         assert(task is not None)
-        if task[1].terminate():
-            return jsonify({"status":Status.SUCCESS, "message": "节点暂停成功", "result":{}})
-        else:
-            return jsonify({"status":Status.ERROR, "message": "节点暂停失败", "result":{}})
+        if not task[1].terminate():
+            return jsonify({"status":Status.ERROR.value, "message": "节点暂停失败", "result":{}})
     else:
-        return jsonify({"status":Status.ERROR, "message": "无效操作", "result":{}})
+        return jsonify({"status":Status.ERROR.value, "message": "无效操作", "result":{}})
         
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    asyncio.run(main())

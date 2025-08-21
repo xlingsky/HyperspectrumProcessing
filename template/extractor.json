@@ -3,21 +3,15 @@
     "dim_prior": "0,1,2",
     "task": [
       {
-        "<xmlattr>": {
-          "name": "removal"
-        },
+        "name": "removal",
         "interval": "10"
       },
       {
-        "<xmlattr>": {
-          "name": "anomaly"
-        },
+        "name": "anomaly",
         "ksize": "10"
       },
       {
-        "<xmlattr>": {
-          "name": "extractor"
-        },
+        "name": "extractor",
         "type": "peak",
         "length_min": "4",
         "length_max": "20",

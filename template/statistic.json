@@ -1,0 +1,9 @@
+{
+  "HSP": {
+    "dim_prior": "0,1,2",
+    "task": {
+      "name": "statistic",
+      "method": "mean"
+    }
+  }
+}
