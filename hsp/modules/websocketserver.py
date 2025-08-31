@@ -3,23 +3,22 @@ import websockets
 import queue
 
 class WebSocketServer:
-    def __init__(self, host="localhost", port=8765):
-        self.host = host
-        self.port = port
+    def __init__(self):
         self.clients = set()
         self.message_queue = queue.Queue()  # Message queue
 
     async def register_client(self, websocket):
         self.clients.add(websocket)
-        await self.notify_clients(f"New client connected: {websocket.remote_address}")
+        print(f"New client connected: {websocket.remote_address}")
 
     async def unregister_client(self, websocket):
         self.clients.remove(websocket)
-        await self.notify_clients(f"Client disconnected: {websocket.remote_address}")
+        print(f"Client disconnected: {websocket.remote_address}")
 
     async def notify_clients(self, message):
         if self.clients:
-            await asyncio.wait([client.send(message) for client in self.clients])
+            for client in self.clients:
+                await client.send(message)
 
     async def send_progress(self, progress):
         message = f"Progress: {progress}%"
@@ -35,11 +34,22 @@ class WebSocketServer:
                 await self.notify_clients(message)
             await asyncio.sleep(0.1)  # Sleep to prevent busy waiting
 
-    async def run_server(self, host, port):
-        async with websockets.serve(self.handler, host, port):
-            await self.send_messages_from_queue()  # Run the message sending loop
+    async def sender(self, websocket):
+        await self.register_client(websocket)
+        try:
+            while True:
+                if not self.message_queue.empty():
+                    message = self.message_queue.get_nowait()
+                    await self.notify_clients(message)
+                await asyncio.sleep(0.1)  # Sleep to prevent busy waiting
+        finally:
+            await self.unregister_client(websocket)
 
-    async def handler(self, websocket, path):
+    async def run_server(self, host, port):
+        server = await websockets.serve(self.sender, host, port)
+        await server.wait_closed()
+
+    async def handler(self, websocket):
         await self.register_client(websocket)
         try:
             while True:
@@ -49,12 +59,7 @@ class WebSocketServer:
         finally:
             await self.unregister_client(websocket)
 
-    def start(self):
-        start_server = websockets.serve(self.handler, self.host, self.port)
-        asyncio.get_event_loop().run_until_complete(start_server)
-        asyncio.get_event_loop().run_forever()
-
 # Example usage:
 if __name__ == "__main__":
     server = WebSocketServer()
-    server.start()
+    asyncio.run(server.run_server('0.0.0.0', 8765))

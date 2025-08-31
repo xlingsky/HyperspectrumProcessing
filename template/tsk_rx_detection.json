@@ -4,11 +4,11 @@
     "task": [
       {
         "name": "removal",
-        "interval": "10"
+        "interval": "1"
       },
       {
         "name": "anomaly",
-        "ksize": "10"
+        "ksize": "1"
       },
       {
         "name": "extractor",

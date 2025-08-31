@@ -8,20 +8,20 @@
 "CreationTime":1755051983760,
 "SatelliteID":"GF7"},
 "FileBody":
-{"WorkDir":"D:\\pythoncode\\803\\output2",
+{"WorkDir":"/Users/xlingsky/Desktop/demo/803_ws",
 "OperatorName":"sys",
 "Priority":"0",
 "UserType":"sys",
-"InputFile":"D:\\pythoncode\\803\\input",
-"LocalWorkDir":"/tmp/GF07",
+"InputFile":"/Users/xlingsky/Desktop/demo/added0610-1_WHreduced",
+"LocalWorkDir":"/Users/xlingsky/Desktop/demo/803_tmp",
 "StartFrame": "10001.tif",
-"EndFrame": "10099.tif"
+"EndFrame": "10009.tif"
 },
 "Parameters":
-{"BackgroundFrames":"15",
-"TargetMaximumSize":"",
-"MaxMissingFrames":"10",
-"MinDetectionFrames":"10",
+{"BackgroundFrames":"13",
+"TargetMaximumSize":"400",
+"MaxMissingFrames":"30",
+"MinDetectionFrames":"30",
 "MaxSpeed":"800",
 "MinSpeed":"200",
 "MinAltitude":"",
@@ -33,7 +33,9 @@
 },
 "Evaluation":
 {"RealTrajectory":"",
- "UnvalTrajectory":""
+ "UnvalTrajectory":"",
+ "Type":"0,1,2", 
+ "Indicates":"0,1"
 },
 "FlowType":"",
 "FlowPointSequence":""

@@ -241,8 +241,6 @@ int main(int argc, char* argv[]){
           dstpath /= path.filename();
         }
       }
-      dstpath.replace_extension();
-      dstpath += "_"+type;
       xlingsky::raster::Operator* op = nullptr;
       if(type=="peak"){
         xlingsky::raster::extractor::PeakDetection* p = 
@@ -253,7 +251,7 @@ int main(int argc, char* argv[]){
         op = p;
         boutput = 1;
       } else{
-        dstpath += ".txt";
+        dstpath += "_lines.txt";
         auto *p = new xlingsky::raster::extractor::LSDExtractor(
             src_size[store_prior[2]], v);
         p->SetFilePath(dstpath.string().c_str());

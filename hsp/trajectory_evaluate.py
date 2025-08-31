@@ -283,8 +283,4 @@ def run(flag,choice):
 
 
 
-
-run(0,"1")
-
-
     

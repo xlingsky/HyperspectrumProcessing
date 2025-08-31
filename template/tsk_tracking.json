@@ -1,0 +1,13 @@
+{
+  "min_frame_number": 15,
+  "min_speed": 0.1,
+  "max_acceleration": 0.6,
+  "kalman": {
+    "transition_matrix":[[1,0,1,0],[0,1,0,1],[0,0,1,0],[0,0,0,1]],
+    "process_noise": 1e-1,
+    "measurement_noise": 1e-1,
+    "error_cov_post": 1.0,
+    "max_missing_frames": 30,
+    "search_radius": 2.5
+  }
+}
