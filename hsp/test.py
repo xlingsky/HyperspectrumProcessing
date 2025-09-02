@@ -38,11 +38,11 @@ def run_script_with_realtime_output(script_path, tag = None):
             
 
 if __name__ == "__main__":
-    dirpath = os.path.dirname(__file__)
 
+    dirpath = os.path.dirname(__file__)
     share = dict()
-    workflow.tracking_processing(os.path.join(os.path.dirname(
-        dirpath), "template/Order.json"), service.Event(), service.Logger(), share)
+    cfg = workflow.read_order_file(os.path.join(os.path.dirname( dirpath), "template/Order.json"))
+    workflow.geolocating_process( cfg, service.Event(), service.Logger(), share)
 
     exit(0)
 

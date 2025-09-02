@@ -10,6 +10,7 @@ import subprocess
 import ast
 import input_check
 import json
+import pickle
 
 
 app = Flask("HSP")
@@ -59,7 +60,7 @@ class Action(Enum):
 algorithm = {
     "ID_WF_MBJC": workflow.detection_processing,
     "ID_WF_MBGZ": workflow.tracking_processing,
-    "ID_WF_GJSC": workflow.automatic_processing,
+    "ID_WF_GJSC": workflow.geolocating_process,
     "ID_WF_GJRH": workflow.automatic_processing,
     "ID_WF_MBSB": workflow.automatic_processing,
     "ID_WF_GJYC": workflow.automatic_processing,
@@ -98,9 +99,14 @@ def message_processing():
                 return jsonify({"status": Status.ERROR.value, "message": "节点重启失败", "result": {}})
             else:
                 return jsonify({"status": Status.SUCCESS.value, "message": "节点重启成功", "result": {}})
+        cfg = workflow.read_order_file(data.get('OrderPath'))
+        if cfg is None:
+            return jsonify({"status": Status.ERROR.value, "message": "读取订单文件失败", "result": {}})
         job[taskid] = Event()
-        flag, ret = algorithm[taskid](data.get('OrderPath'), job[taskid], job['logger'], job['share'])
+        flag, ret = algorithm[taskid]( cfg, job[taskid], job['logger'], job['share'])
         if flag :
+            with open( os.path.join(cfg['output_dir'], f'{hdr[0]}.pkl'), 'wb') as f:
+                pickle.dump(job, f)
             return jsonify({"status": Status.SUCCESS.value, "message": "节点运行完成", "result": ret})
         else:
             return jsonify({"status": Status.ERROR.value, "message": ret, "result": {}})

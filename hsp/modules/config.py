@@ -26,6 +26,10 @@ DEFAULT_CFG = {
     'target_maximum_speed': 2,
     'tracking_output_postfix': ['_points.txt', '_lines.txt'],
 
+    'recognition_airplane_angular_velocity': 3,
+
+    'sofa': 'EOP.txt',
+
     'debug': False
 }
 

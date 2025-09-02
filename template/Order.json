@@ -23,7 +23,7 @@
 "MaxMissingFrames":"30",
 "MinDetectionFrames":"30",
 "MaxSpeed":"800",
-"MinSpeed":"200",
+"MinSpeed":"40",
 "MinAltitude":"",
 "MaxAltitude":"",
 "SearchRange":"",

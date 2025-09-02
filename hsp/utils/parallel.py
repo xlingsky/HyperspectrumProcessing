@@ -75,7 +75,7 @@ def launch_calls(fun, list_of_args, nb_workers, *extra_args, batchwise=False,
     outputs = []
     show_progress.counter = 0
     show_progress.total = len(list_of_args)
-    pool = multiprocessing.Pool(nb_workers)
+    pool = multiprocessing.Pool(min(nb_workers, len(list_of_args)))
     for x in list_of_args:
         args = tuple()
         if type(x) == tuple:

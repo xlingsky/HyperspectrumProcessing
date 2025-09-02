@@ -7,8 +7,9 @@ from typing import List
 import cv2
 import numpy as np
 import json
+import rasterio
 
-from hsp.utils import common
+from hsp.utils import common, curvature
 
 DETECTION_DIRNAME = 'detection'
 TRACKING_DIRNAME = 'tracking'
@@ -179,8 +180,14 @@ class KalmanTracker:
     def estimate(self) -> np.ndarray:
         prediction = self.kf.predict()
         return prediction.reshape(-1)[:2]
+
+    def curvature(self, method = 'spline') -> np.ndarray:
+        if len(self._points) < 5:
+            return np.zeros(len(self._points))
+        data = np.array([[x[0], x[1]] for x in self._points], dtype=np.float32)
+        return curvature.calculate_angular_acceleration(data)
     
-    def is_valid(self, min_frame_number: int, min_speed: float, max_acceleration: float) -> bool:
+    def is_valid(self, min_frame_number: int, min_speed: float, max_acceleration: float, curvature: str) -> bool:
         if len(self._points) < min_frame_number:
             return False
         
@@ -214,6 +221,8 @@ class KalmanTracker:
                 
                 if hist[0] + hist[hist_size - 1] > max_acceleration * len(self._points):
                     return False
+
+        self._curvature = self.curvature(curvature)
         
         return True
 
@@ -278,8 +287,87 @@ def save_tracking(directory: str, file: str, tracker: KalmanTracker, frames:list
         with open(os.path.join(directory, file), 'w') as f:
             f.write('{} {}\n'.format(tracker._frame_start, len(tracker._points)))
             for i, pt in enumerate(tracker._points):
-                f.write('{}\t{}\t{}\n'.format( frames[tracker._frame_start+i], '\t'.join(str(x) for x in pt), tracker._point_ids[i]))
+                f.write('{}\t{}\t{}\n'.format( frames[tracker._frame_start+i], '\t'.join(f'{x:.2f}' for x in pt), tracker._point_ids[i]))
     except Exception as e:
         print(f"[ERROR]: {e}")
 
-    return [tracker._frame_start, len(tracker._points), file]
+    return [tracker._frame_start, len(tracker._points), np.max(tracker._curvature[0]), file]
+
+def load_tracking( file:str ):
+    frame_start = -1
+    cnt = 0
+    points = []
+    try:
+        with open(file, 'r') as f:
+            lines = f.readlines()
+            t = lines[0].strip().split()
+            frame_start = int(t[0])
+            cnt = int(t[1])
+            for i in range(cnt):
+                t = lines[i+1].strip().split()
+                t[1:-1] = [float(x) for x in t[1:-1]]
+                t[-1] = int(t[-1])
+                points.append(t)
+    except Exception as e:
+        print(f"[ERROR]: {e}")
+    return frame_start, cnt, points
+
+def compute_geometric_center(image_window):
+    """
+    Compute the geometric center (centroid) of a grayscale image window.
+
+    Args:
+        image_window (numpy.ndarray): 2D array representing the image window.
+
+    Returns:
+        tuple: (x_center, y_center) coordinates of the centroid.
+    """
+    # Get the dimensions of the image window
+    height, width = image_window.shape
+
+    # Create coordinate grids
+    y_coords, x_coords = np.mgrid[0:height, 0:width]
+
+    # Compute total intensity (sum of all pixel values)
+    total_intensity = np.sum(image_window)
+
+    if total_intensity == 0:
+        # Avoid division by zero; return center of window if uniform
+        return width / 2, height / 2
+
+    # Compute weighted centroids
+    x_center = np.sum(x_coords * image_window) / total_intensity
+    y_center = np.sum(y_coords * image_window) / total_intensity
+
+    return x_center, y_center
+
+def interpolate(image, x, y):
+    height, width = image.shape
+    x0 = np.floor(x).astype(int)
+    x1 = np.minimum(x0+1, width-1)
+    y0 = np.floor(y).astype(int)
+    y1 = np.minimum(y0+1, height-1)
+
+    x_frac = x-x0
+    y_frac = y-y0
+
+    top = image[y0, x0]*(1-x_frac)+image[y0, x1]*x_frac
+    bottom = image[y1, x0]*(1-x_frac)+image[y1, x1]*x_frac
+    return top*(1-y_frac)+bottom*y_frac
+
+def refine_trajectory(trajectory: list, directory: str, config : dict):
+    sz = int(3)
+    half_sz = sz // 2
+    for i, pt in enumerate(trajectory):
+        frame = os.path.join(directory, pt[0])
+        try:
+            img = rasterio.open(frame)
+            x, y = max(int(pt[1])-half_sz,0), max(int(pt[2])-half_sz,0)
+            xe, ye = min(x+sz, img.width), min(y+sz, img.height)
+            win = rasterio.windows.Window( x, y, xe-x, ye-y)
+            data = img.read(window=win)[0]
+            xo, yo = compute_geometric_center(data)
+            trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo), pt[-1]]
+        except:
+            continue
+    return trajectory

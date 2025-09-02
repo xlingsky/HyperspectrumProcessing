@@ -53,3 +53,5 @@ target_link_libraries(j2cgcs PRIVATE GDAL::GDAL gflags glog::glog ${Boost_LIBRAR
 
 add_executable(tracker ${tracker} )
 target_link_libraries(tracker PRIVATE gflags glog::glog Boost::filesystem opencv_video )
+
+add_library(sofa SHARED ${sofa})
