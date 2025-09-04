@@ -8,6 +8,7 @@ from ctypes import *
 import numpy  as  np
 import numpy.ctypeslib  as  nt
 import os
+import platform
 
 libs_dir = os.path.dirname(__file__)
 while True:
@@ -15,7 +16,15 @@ while True:
         break
     libs_dir = os.path.dirname(libs_dir)
 
-libs_file  = 'libsofa.dylib'
+system = platform.system()
+if system == 'Linux':
+    lib_extension = '.so'
+elif system == 'Darwin':
+    lib_extension = '.dylib'
+else:
+    lib_extension = '.dll'
+
+libs_file  = 'libsofa'+lib_extension
 libs_path  = os.path.join(libs_dir, 'build', libs_file) 
 lib       = CDLL(libs_path)
 

@@ -6,6 +6,18 @@ import pyproj
 
 GEOLOCATION_DIRNAME = 'geolocation'
 
+geographic_to_geocentric = pyproj.Transformer.from_crs(
+            "EPSG:4979",  # Geographic 3D CRS (WGS84 with height)
+            "EPSG:4978",  # Geocentric CRS (WGS84)
+            always_xy=True  # Ensure lon, lat order
+        )
+
+def transform_geographic_to_geocentric(lon, lat, alt):
+    return geographic_to_geocentric.transform(lon, lat, alt)
+
+def transform_geocentric_to_geographic(x, y, z): 
+    return geographic_to_geocentric.transform(x, y, z, direction= pyproj.enums.TransformDirection.INVERSE)
+
 def init(config : dict):
     eop = os.path.join(common.parent_dir, 'data', config['sofa'])
     if not os.path.exists(eop):
@@ -25,11 +37,7 @@ class Locating:
         self.load_rpc(rpcpath)
         lon, lat = self.rpc.lon_offset, self.rpc.lat_offset
         self.geographic_to_projection = pyproj.Transformer.from_crs(4326, compute_epsg(lon, lat), always_xy=True)
-        self.geographic_to_geocentric = pyproj.Transformer.from_crs(
-            "EPSG:4979",  # Geographic 3D CRS (WGS84 with height)
-            "EPSG:4978",  # Geocentric CRS (WGS84)
-            always_xy=True  # Ensure lon, lat order
-        )
+        self.geographic_to_geocentric = geographic_to_geocentric 
 
     def load_rpc(self, geotiff):
         try:

@@ -107,15 +107,18 @@ def generate_tracking_configs(configdir, tracking_missing_frames, tracking_minim
         return None
 
 def detect_anomaly( image, configdir, bg, output_prefix, output_feature = True):
-    if output_feature:
-        rx = output_prefix+'_rx.tif'
-        common.run('{0} -task {1} -o {2} {3} {4} -v 0'.format('hsp',
-               os.path.join(configdir, 'tsk_rx.json'), rx, image, bg))
-        common.run('{0} -task {1} -o {2} {3} -v 0'.format('hsp',
-               os.path.join(configdir, 'tsk_detection.json'), output_prefix, rx ))
-    else:
-        common.run('{0} -task {1} -o {2} {3} {4} -v {5}'.format('hsp',
-               os.path.join(configdir, 'tsk_rx_detection.json'), output_prefix, image, bg, 0))
+    try:
+        if output_feature:
+            rx = output_prefix+'_rx.tif'
+            common.run('{0} -task {1} -o {2} {3} {4} -v 0'.format('hsp',
+                   os.path.join(configdir, 'tsk_rx.json'), rx, image, bg))
+            common.run('{0} -task {1} -o {2} {3} -v 0'.format('hsp',
+                   os.path.join(configdir, 'tsk_detection.json'), output_prefix, rx ))
+        else:
+            common.run('{0} -task {1} -o {2} {3} {4} -v {5}'.format('hsp',
+                   os.path.join(configdir, 'tsk_rx_detection.json'), output_prefix, image, bg, 0))
+    except Exception as e:
+        print(f"[ERROR]: {e}")
 
 class KalmanTracker:
     def __init__(self, frame_start: int, ptid: int, pt: np.ndarray, params: dict):

@@ -13,6 +13,8 @@ import tempfile
 import subprocess
 import numpy as np
 import rasterio
+import random
+import cv2
 
 
 # silent rasterio NotGeoreferencedWarning
@@ -215,3 +217,63 @@ def concatenate_images(image_paths, directory = None):
             img = src.read()
             images.append(img)
     return np.concatenate(images, axis=0)
+
+def generate_random_color(seed=None):
+    """
+    Generate a random color.
+
+    :param seed: An optional seed for the random number generator.
+    :return: A tuple (r, g, b) representing the color.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    r = random.randint(0, 255)
+    g = random.randint(0, 255)
+    b = random.randint(0, 255)
+
+    return (r, g, b)
+
+def draw( image, seeds, color, text = None, kwargs = dict()):
+    radius = kwargs.get('radius', 2)
+    thickness = kwargs.get('thickness', 1)
+    font_scale = kwargs.get('fontScale', 0.3)
+    for seed in seeds:
+        cv2.circle(image, (int(seed[0]), int(seed[1])), radius, color, thickness )
+
+    if text is not None:
+        if isinstance(text, str):
+            text = [text]*len(seeds)
+        for seed, t in zip(seeds, text):
+            cv2.putText(image, t, (int(seed[0]), int(seed[1])-radius), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color)
+
+    if kwargs.get('showCoordinates', False) :
+        for seed in seeds:
+            cv2.putText(image, f'({seed[0]:.1f},{seed[1]:.1f})', (int(seed[0]), int(seed[1])+radius), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color)
+
+    if kwargs.get('linked', False):
+        for i in range(len(seeds)-1):
+            s1 = seeds[i]
+            s2 = seeds[i+1]
+            cv2.line(image, (int(s1[0]), int(s1[1])), (int(s2[0]), int(s2[1])), color , thickness )
+
+    return image
+
+def normalize_to_8bit_rgb(image):
+    if image.dtype != np.float32:
+        image = image.astype(np.float32)
+
+    normalized = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+    u8 = normalized.astype(np.uint8)
+
+    return cv2.cvtColor(u8, cv2.COLOR_GRAY2BGR)
+
+def rasterio_read_as_rgb24(path, window=None):
+    with rasterio.open(path, 'r') as src:
+        img = src.read(window=rasterio.windows.Window(*window) if window is not None else None)[0,:,:]
+
+        return normalize_to_8bit_rgb(img)
+
+def get_image_shape(path):
+    with rasterio.open(path, 'r') as src:
+        return src.width, src.height, src.count

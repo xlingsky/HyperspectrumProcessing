@@ -12,7 +12,7 @@
 "OperatorName":"sys",
 "Priority":"0",
 "UserType":"sys",
-"InputFile":"/Users/xlingsky/Desktop/demo/added0610-1_WHreduced",
+"InputFile":"/Users/xlingsky/codespaces/HyperspectrumProcessing/data", 
 "LocalWorkDir":"/Users/xlingsky/Desktop/demo/803_tmp",
 "StartFrame": "10001.tif",
 "EndFrame": "10009.tif"

@@ -27,8 +27,10 @@ DEFAULT_CFG = {
     'tracking_output_postfix': ['_points.txt', '_lines.txt'],
 
     'recognition_airplane_angular_velocity': 3,
+    'ground_altitude': 0,
 
     'sofa': 'EOP.txt',
+    'orderjson': "order.json",
 
     'debug': False
 }
@@ -75,14 +77,21 @@ def orderjson_to_config(orderxml):
             cfg['temporary_dir'] = params['LocalWorkDir']
             cfg['start_frame'] = params.get('StartFrame')
             cfg['end_frame'] = params.get('EndFrame')
+            if cfg['start_frame'] is None:
+                cfg['start_frame'] = ''
+            if cfg['end_frame'] is None:
+                cfg['end_frame'] = ''
 
             params = data['InterfaceFile']['Parameters']
-            cfg['background_frame_number'] = int(params['BackgroundFrames'])
-            cfg['tracking_missing_frames'] = int(params['MaxMissingFrames'])
-            cfg['tracking_minimum_frames'] = int(params['MinDetectionFrames'])
-            cfg['target_maximum_size'] = float(params['TargetMaximumSize'])/400
-            cfg['target_minimum_speed'] = float(params['MinSpeed'])/400
-            cfg['target_maximum_speed'] = float(params['MaxSpeed'])/400
+            try:
+                cfg['background_frame_number'] = int(params['BackgroundFrames'])
+                cfg['tracking_missing_frames'] = int(params['MaxMissingFrames'])
+                cfg['tracking_minimum_frames'] = int(params['MinDetectionFrames'])
+                cfg['target_maximum_size'] = float(params['TargetMaximumSize'])/400
+                cfg['target_minimum_speed'] = float(params['MinSpeed'])/400
+                cfg['target_maximum_speed'] = float(params['MaxSpeed'])/400
+            except Exception as e:
+                print(f"[WARNING]: {e}")
 
             if not os.path.exists(cfg['input_dir']):
                 return None

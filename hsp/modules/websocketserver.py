@@ -16,9 +16,14 @@ class WebSocketServer:
         print(f"Client disconnected: {websocket.remote_address}")
 
     async def notify_clients(self, message):
-        if self.clients:
-            for client in self.clients:
-                await client.send(message)
+        try:
+            if self.clients:
+                for client in self.clients:
+                    await client.send(message)
+        except Exception as e:
+            self.clients.clear()
+            self.clients = set()
+            print(f"[Websocket ERROR]: {e}. Clear all clients.")
 
     async def send_progress(self, progress):
         message = f"Progress: {progress}%"
@@ -32,7 +37,7 @@ class WebSocketServer:
             if not self.message_queue.empty():
                 message = self.message_queue.get_nowait()
                 await self.notify_clients(message)
-            await asyncio.sleep(0.1)  # Sleep to prevent busy waiting
+            await asyncio.sleep(0.001)  # Sleep to prevent busy waiting
 
     async def sender(self, websocket):
         await self.register_client(websocket)
@@ -41,7 +46,7 @@ class WebSocketServer:
                 if not self.message_queue.empty():
                     message = self.message_queue.get_nowait()
                     await self.notify_clients(message)
-                await asyncio.sleep(0.1)  # Sleep to prevent busy waiting
+                await asyncio.sleep(0.001)  # Sleep to prevent busy waiting
         finally:
             await self.unregister_client(websocket)
 

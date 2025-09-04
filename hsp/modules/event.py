@@ -7,6 +7,7 @@ class Event:
         PAUSED = 2
         FINISHED = 3
         KILLED = 4
+        FAILED = 5
         
     def __init__(self):
        self._status = Event.Status.RUNNING
@@ -22,6 +23,12 @@ class Event:
     def terminate(self):
         self._status = Event.Status.KILLED
         return True
+    def finish(self):
+        self._status = Event.Status.FINISHED
+        return True
+    def fail(self):
+        self._status = Event.Status.FAILED
+        return True
 
     def is_paused(self):
         return self._status == Event.Status.PAUSED
@@ -31,6 +38,8 @@ class Event:
         return self._status == Event.Status.RUNNING
     def is_finished(self):
         return self._status == Event.Status.FINISHED
+    def is_failed(self):
+        return self._status == Event.Status.FAILED
             
 
     

@@ -3,9 +3,10 @@ import sys
 import json
 import xml.etree.ElementTree as ET
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import multiprocessing
 import numpy as np
+import cv2
 
 from hsp.modules.config import orderjson_to_config
 from hsp.utils.filewatcher import TimeoutFileWatcher
@@ -73,12 +74,12 @@ def while_loop_with_events( process, total, batchsize, event, logger):
         logger.progress_update(progress)
 
         if event.is_terminated():
-            return False, "用户终止"
+            return True, "用户终止"
 
         while event.is_paused():
             time.sleep(0.5)
             if event.is_terminated():
-                return False, "用户终止"
+                return True, "用户终止"
 
 def evaluation(parameters):
     with open(parameters['OrderPath'],'r') as f:
@@ -156,13 +157,28 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
     if not config['overwritten'] and os.path.exists(output):
         return
     with open(trajectory, 'r') as f:
-        output_info = {"trajectory_id": os.path.splitext(os.path.basename(output))[ 0],
-                       "datatime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 
-                       "SatelliteList": { "Satellite":[{"ID": "1"} ]}, "PointList": { "Point": [] } }
         start, cnt, points = object_tracking.load_tracking(trajectory)
         
         if cnt <= 0:
             return 
+
+        header_info = {
+            "Category": {
+                "Name": "DD" if type else "FJ",
+                "Confidence": min(len(points)/100, 1),
+                "Classification":{
+                    "Name" : "",
+                    "BoostStage": "",
+                    "Confidence": 0
+                }
+            }
+        }
+
+        output_info = {
+            "LaunchAzimuth": 0,
+            "ID": os.path.splitext(os.path.basename(output))[0],
+            "DataTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "SatelliteList": {"Satellite": [{"ID": "1"}]}, "PointList": {"Point": []}}
 
         sofa_transformer = config['sofa']
         points_info = output_info["PointList"]["Point"]
@@ -178,9 +194,9 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
             frame = os.path.join(framedir, point[0])
             info = {
                 "Time": frametime[start+i] if frametime is not None else datetime.fromtimestamp(os.path.getctime(frame)).strftime("%Y-%m-%d %H:%M:%S"),
-                "ImageCoordinates": f"{point[1]:.1f},{point[2]:.1f}",
-                "DigitalNumber": f"{point[3]:.1f}",
-                "Energy": f"{point[3]*0.01:.1f}"
+                "ImageCoordinates": [point[1],point[2]],
+                "DigitalNumber": point[3],
+                "Energy": point[3]*0.01
                 }
 
             if locating.load_rpc(frame):
@@ -189,15 +205,15 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
 
                 graphic, proj, centric = locating.transform(point[1], point[2], z)
 
-                info['Location'] = f"{graphic[0]:.6f},{graphic[1]:.6f},{z:.1f}"
+                info['Location'] = [graphic[0],graphic[1],z]
                 info['Projection'] = [proj[0], proj[1], z]
-                info['CGCS2000'] = f"{centric[0]:.1f},{centric[1]:.1f},{centric[2]:.1f}"
+                info['CGCS2000'] = [centric[0],centric[1],centric[2]]
             
                 if sofa_transformer is not None:
                     cgcs2j = np.linalg.inv(sofa_transformer.j2000_to_cgcs2000_matrix(info['Time'])) 
 
                     j2000 = cgcs2j @ np.array(centric).reshape(3,1)
-                    info['J2000'] = f"{j2000[0,0]:.1f},{j2000[1,0]:.1f},{j2000[2,0]:.1f}"
+                    info['J2000'] = [j2000[0,0],j2000[1,0],j2000[2,0]]
 
             points_info.append(info)
 
@@ -206,16 +222,153 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         for i in range(1,len(points_info)-1):
             points_info[i]['WarningStatus'] = '02H'
 
-        dist = 0
-        for i in range(0,len(points_info)-1):
-            diff = np.array(points_info[i+1]['Projection'])-np.array(points_info[i]['Projection'])
-            dist += np.linalg.norm(diff)
-            points_info[i]['Velocity'] = f"{diff[0]:.1f},{diff[1]:.1f},{diff[2]:.1f}"
+        proj = np.array([x['Projection'] for x in points_info])
+        vx = np.gradient(proj, axis=0)
 
-        output_info['total_distance'] = f"{dist:.1f}"
+        for i in range(len(points_info)):
+            points_info[i]['Velocity'] = list(vx[i])
+            points_info[i]['Type'] = 'Observed'
 
         with open(output, 'w') as fout: 
-            json.dump({"Trajectory":output_info}, fout, indent=2, ensure_ascii=False)
+            json.dump({"Header":header_info, "Trajectory":output_info}, fout, indent=2, ensure_ascii=False)
+
+def trajectory_predicting(output, trajectory, config):
+    if not config['overwritten'] and os.path.exists(output):
+        return
+    import hsp.modules.trajectory_prediction as tp
+    import pyproj
+    from hsp.rpcm import compute_epsg
+
+    def generate_points_dict(points, time, geographic_to_proj, sofa):
+        infos = []
+        for point in points:
+            info = {
+                "Time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "ImageCoordinates": [-1,-1],
+                "DigitalNumber": 0,
+                "Energy": 0
+                }
+            graphic = geometric_locating.transform_geocentric_to_geographic(*point)
+            proj = geographic_to_proj.transform(*graphic)
+
+            info['Location'] = list(graphic)
+            info['Projection'] = list(proj)
+            info['CGCS2000'] = list(point)
+
+            if sofa is not None:
+                cgcs2j = np.linalg.inv(sofa_transformer.j2000_to_cgcs2000_matrix(time)) 
+
+                j2000 = cgcs2j @ np.array(point).reshape(3,1)
+                info['J2000'] = [j2000[0,0],j2000[1,0],j2000[2,0]]
+
+            info['WarningStatus'] = '02H'
+            infos.append(info)
+
+            time += timedelta(seconds=1)
+
+        for i in range(len(infos)):
+            infos[i]['Velocity'] = [0,0,0]
+            infos[i]['Type'] = 'Predicted'
+        return infos
+
+    with open(trajectory, 'r') as f:
+
+        try:
+            data = json.load(f)
+            if data['Header']['Category']['Name'].find('DD') < 0:
+                return
+        except:
+            return 
+
+        points = [x['CGCS2000'] for x in data['Trajectory']['PointList']['Point']]
+        time = [datetime.strptime(x['Time'], "%Y-%m-%d %H:%M:%S")
+                 for x in data['Trajectory']['PointList']['Point']]
+    
+        if points is None or len(points) < 5:
+            return 
+
+        missile_model_params = [35.0, 70.0, 50.0]
+        
+        velocities = np.gradient(points, axis=0)
+        accelerations = np.linalg.norm(np.gradient(velocities, axis=0), axis=1)
+
+        is_two_stage, jump_index = tp.detect_acceleration_jump(accelerations)
+
+        if is_two_stage:
+            # 根据观测数据动态调整参数
+            max_acc = np.max(accelerations)
+            avg_acc = np.mean(accelerations)
+
+            two_stage_params = {
+                'a0_1': avg_acc * 0.6,  # 一级起始加速度
+                'a1_1': avg_acc * 0.9,  # 一级结束加速度
+                'T1': jump_index + 10,  # 基于检测到的跳跃点
+                'a0_2': max_acc * 0.7,  # 二级起始加速度
+                'a1_2': max_acc * 1.1,  # 二级结束加速度
+                'T2': len(accelerations) - jump_index + 20,  # 二级助推时间
+                'T_total': len(accelerations) + 30  # 总助推时间
+            }
+
+            # 匹配二级助推模型
+            match_start_time, correlation, mse, stage_info = tp.find_boost_phase_position(
+                accelerations, missile_model_params, 'two_stage', two_stage_params)
+
+            # 使用二级助推参数进行后续计算
+            effective_model_params = two_stage_params
+            stage_type = 'two_stage'
+
+        else:
+            # 单级助推
+            match_start_time, correlation, mse, stage_info = tp.find_boost_phase_position(
+                accelerations, missile_model_params, 'single')
+            effective_model_params = missile_model_params
+            stage_type = 'single'
+
+        stop_altitude = config['ground_altitude']
+        launch_points = tp.estimate_launch_point_kinematic(
+            points, velocities, match_start_time, stop_altitude,
+            effective_model_params, stage_type)
+
+        points_to_shutdown, shutdown_velocity_ecef = tp.estimate_shutdown_point_kinematic(
+            points, velocities, accelerations, match_start_time,
+            effective_model_params, stage_type)
+
+        time_interval = 1
+        landing_points = tp.missile_impact_prediction(
+            points[-1] if len(points_to_shutdown) == 0 else points_to_shutdown[-1], shutdown_velocity_ecef, stop_altitude, time_interval)
+
+        points_info = []
+        sofa_transformer = config['sofa']
+        lonlat = data['Trajectory']['PointList']['Point'][0]['Location']
+        geographic_to_proj = pyproj.Transformer.from_crs(4326, compute_epsg(lonlat[0], lonlat[1]), always_xy=True)
+
+        if len(launch_points) > 0:
+            launch_points.reverse()
+            infos = generate_points_dict(launch_points, time[0]-timedelta(seconds=len(launch_points)), geographic_to_proj, sofa_transformer)
+            points_info += infos
+
+        points_info += data['Trajectory']['PointList']['Point']
+
+        if len(points_to_shutdown) > 0:
+            infos = generate_points_dict(points_to_shutdown, time[-1], geographic_to_proj, sofa_transformer)
+            points_info += infos
+
+        points_info[-1]['Type'] += '|BurnOut'
+
+        if len(landing_points)>0:
+            infos = generate_points_dict(landing_points, time[-1]+timedelta(seconds=len(points_to_shutdown)), geographic_to_proj, sofa_transformer)
+            points_info += infos
+
+        proj = np.array([x['Projection'] for x in points_info])
+        vxs = np.gradient(proj, axis=0)
+
+        for vx,pt in zip(vxs,points_info):
+            pt['Velocity'] = list(vx)
+
+        data['Trajectory']['PointList']['Point'] = points_info
+        data['Header']['Category']['Classification']['BoostStage'] = "2" if is_two_stage else "1"
+        with open(output, 'w') as fout: 
+            json.dump(data, fout, indent=2, ensure_ascii=False)
 
 def automatic_processing(cfg, event, logger, share, start_from = 0):
     def newfile_callback(directory, filename):
@@ -317,7 +470,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                     seedfiles = [x[0]+detection_postfix for x in anomaly_batches]
                     finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, tracking_params, object_tracking.load_detection)
                     for tracker in finished:
-                        name = 'M{}{}'.format(len(finished_trajectories[i]+1), cfg['tracking_output_postfix'][i])
+                        name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
                         finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, files))
 
                 if not file_watcher.is_alive() and progress+newfile_count >= len(files):
@@ -335,7 +488,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                 for st, x in zip(num_trajectories, finished_trajectories):
                     new_trajectories += x[st:]
 
-                print('\t#NEW Targets: {}'.format(len(new_trajectories)))
+                print('\t#NEW Targets: {}/{}'.format(len(new_trajectories), num_trajectories[0]+num_trajectories[1]+len(new_trajectories)))
                 common.print_elapsed_time()
 
                 if len(new_trajectories) > 0:
@@ -346,12 +499,15 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
 
                     print('1f) geolocating trajectories ...')
                     st = num_trajectories[0]+num_trajectories[1]+1
-                    batches = [( os.path.join(dir_output, f'M{st+i}.json' ), trajectory[1], trajectory[0] < 3 ) for i,trajectory in enumerate(new_trajectories) ]
+                    batches = [( os.path.join(dir_output, f'M{st+i}.json' ), os.path.join( dir_tracking, trajectory[-1]), trajectory[-2] < 3 ) for i,trajectory in enumerate(new_trajectories) ]
                     parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, None, cfg, timeout=cfg['timeout'])
 
                     trajectory3d += [(batch[0],) for batch in batches]
 
                     num_trajectories = [len(x) for x in finished_trajectories]
+
+                    for batch in batches:
+                        logger.report(batch[0])
                 
                     common.print_elapsed_time()
 
@@ -360,12 +516,12 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                 logger.progress_update(progress)
 
             if event.is_terminated():
-                return False, "用户终止"
+                return True, "用户终止"
 
             while event.is_paused():
                 time.sleep(0.5)
                 if event.is_terminated():
-                    return False, "用户终止"
+                    return True, "用户终止"
 
         file_watcher.join()
 
@@ -478,12 +634,12 @@ def detection_processing(cfg, event, logger, share):
         logger.progress_update(progress)
 
         if event.is_terminated():
-            return False, "用户终止"
+            return True, "用户终止"
 
         while event.is_paused():
             time.sleep(0.5)
             if event.is_terminated():
-                return False, "用户终止"
+                return True, "用户终止"
 
     print('3) collecting detection results ...')
     logger.set_step(2) 
@@ -572,12 +728,12 @@ def tracking_processing(cfg, event, logger, share):
         logger.progress_update(progress)
 
         if event.is_terminated():
-            return False, "用户终止"
+            return True, "用户终止"
 
         while event.is_paused():
             time.sleep(0.5)
             if event.is_terminated():
-                return False, "用户终止"
+                return True, "用户终止"
 
     for i, trajectories in enumerate(trackers):
         if len(trajectories) == 0:
@@ -605,12 +761,12 @@ def tracking_processing(cfg, event, logger, share):
         progress += num
 
         if event.is_terminated():
-            return False, "用户终止"
+            return True, "用户终止"
 
         while event.is_paused():
             time.sleep(0.5)
-            if event.is_terminated():
-                return False, "用户终止"
+            if event.is_terminated(): 
+                return True, "用户终止"
 
     summary_files = [os.path.join(cfg['output_dir'], 'tracking_point_list.csv'), os.path.join(cfg['output_dir'], 'tracking_line_list.csv')]
     for summary, trajectories in zip( summary_files, finished_trajectories):
@@ -621,7 +777,7 @@ def tracking_processing(cfg, event, logger, share):
     common.print_elapsed_time(True)
     return True, {'points':summary_files[0], 'lines':summary_files[1]}
 
-def geolocating_process(cfg, event, logger, share):
+def geolocating_processing(cfg, event, logger, share):
 
     common.print_elapsed_time.t0 = datetime.now()
     logger.set_step(0) 
@@ -649,14 +805,14 @@ def geolocating_process(cfg, event, logger, share):
                 trajectories[i] = [l.strip().split(',')[-2:] for l in f]
         except Exception as e:
             print(f"[ERROR]: trajectory file list {file}: {e}!")
-            return False, "二维轨迹文件列表载入失败"
+            return False, "目标跟踪没有结果"
 
     filecount = len(trajectories[0])+len(trajectories[1])
     print('1) checking #{} tracking results: #{} point files and #{} line files ...'.format(filecount, len(trajectories[0]), len(trajectories[1])))
 
     if filecount == 0:
         print(f"[ERROR]: No tracking results found!")
-        return False, "二维轨迹文件列表载入失败"
+        return False, "目标跟踪没有结果"
 
     if not geometric_locating.init(cfg): #or share.get('input_frames') is None or len(share['input_frames'])==0:
         return False, "轨迹生成配置初始化失败"
@@ -678,54 +834,175 @@ def geolocating_process(cfg, event, logger, share):
     share['3d_trajectories'] = []
     trajectory3d = share['3d_trajectories']
 
+    trajectories = trajectories[0]+trajectories[1]
     progress = 0
-    filecount = len(trajectories[0])
+    filecount = len(trajectories)
     while progress < filecount:
         num = min(batchsize, filecount-progress)
 
-        batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], trajectory[0] < 3 ) for i,trajectory in enumerate(trajectories[0][progress:progress+num]) ]
+        batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], trajectory[0] < 3 ) for i,trajectory in enumerate(trajectories[progress:progress+num]) ]
         parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, frametime, cfg, timeout=cfg['timeout'])
 
-        trajectory3d += [(batch[0],) for batch in batches]
+        trajectory3d += [(batch[0],) for batch in batches if os.path.exists(batch[0])]
 
         progress += num
         logger.progress_update(progress)
 
         if event.is_terminated():
-            return False, "用户终止"
+            return True, "用户终止"
 
         while event.is_paused():
             time.sleep(0.5)
             if event.is_terminated():
-                return False, "用户终止"
-
-    filecount = len(trajectories[1])
-    while progress < filecount:
-        num = min(batchsize, filecount-progress)
-
-        batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], True ) for i,trajectory in enumerate(trajectories[1][progress:progress+num]) ]
-        parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, frametime, cfg, timeout=cfg['timeout'])
-
-        trajectory3d += [(batch[0],) for batch in batches]
-
-        progress += num
-        logger.progress_update(progress)
-
-        if event.is_terminated():
-            return False, "用户终止"
-
-        while event.is_paused():
-            time.sleep(0.5)
-            if event.is_terminated():
-                return False, "用户终止"
+                return True, "用户终止"
 
     print('3) collecting geolocating results ...')
     with open(os.path.join(dir_output, 'targets.csv'), 'w') as f:
         for trajectory in trajectory3d:
             f.write(','.join([str(x) for x in trajectory])+'\n')
 
+    logger.report([x[0] for x in trajectory3d], cfg['orderjson'])
+
     common.print_elapsed_time(True)
     return True, {'3d_trajectories':trajectory3d }
+
+def trajectory_predicting_processing(cfg, event, logger, share):
+    def newfile_callback(directory, filename):
+        if any(filename.lower().endswith(ext) for ext in ['.json']):
+            newfile_callback.files.append(os.path.join(directory, filename))
+        return True
+
+    common.print_elapsed_time.t0 = datetime.now()
+    logger.set_step(0) 
+
+    # multiprocessing setup
+    nb_workers = multiprocessing.cpu_count()  # nb of available cores
+    if cfg['max_processes'] is not None:
+        nb_workers = cfg['max_processes']
+    batchsize = cfg['background_frame_number']
+    if cfg['batchsize'] is not None:
+        batchsize = cfg['batchsize']
+
+    dir_input = cfg['input_dir']
+    dir_output = cfg['output_dir']
+
+    share['predicted_3d_trajectories'] = list()
+    if not share.get('3d_trajectories'):
+        share['3d_trajectories'] = list()
+    trajectory3d = share['3d_trajectories']
+    predicted_trajectory3d = share['predicted_3d_trajectories']
+
+    if len(trajectory3d) == 0:
+        files = os.path.join(dir_output, 'targets.csv')
+        if not os.path.exists(files):
+            newfile_callback.files = list()
+            common.scan_existing_files(dir_input, newfile_callback)
+            newfile_callback.files.sort()
+            if len(newfile_callback.files) == 0:
+                print(f"[ERROR]: No 3D trajectories found!")
+                return False, "三维轨迹没有结果"
+            trajectory3d += [(file, ) for file in newfile_callback.files]
+        else:
+            with open(files, 'r') as f:
+                trajectory3d += [(file.strip(),) for file in f]
+
+
+    if not geometric_locating.init(cfg): #or share.get('input_frames') is None or len(share['input_frames'])==0:
+        return False, "轨迹生成配置初始化失败"
+
+    print(f'1) predicting #{len(trajectory3d)} trajectories ... ')
+
+    progress = 0
+    filecount = len(trajectory3d)
+    while progress < filecount:
+        num = min(batchsize, filecount-progress)
+
+        batches = [( os.path.join(dir_output, f'M{progress+i+1}_predicted.json' ), trajectory[0] ) for i,trajectory in enumerate(trajectory3d[progress:progress+num]) ]
+        parallel.launch_calls(trajectory_predicting, batches, nb_workers, cfg, timeout=cfg['timeout'])
+
+        predicted_trajectory3d += [(batch[0],) for batch in batches if os.path.exists(batch[0])]
+        
+        progress += num
+        logger.progress_update(progress)
+
+        if event.is_terminated():
+            return True, "用户终止"
+
+        while event.is_paused():
+            time.sleep(0.5)
+            if event.is_terminated():
+                return True, "用户终止"
+
+    print('2) collecting predicting results ...')
+
+    with open(os.path.join(dir_output, 'predicted_targets.csv'), 'w') as f:
+        for trajectory in predicted_trajectory3d:
+            f.write(','.join([str(x) for x in trajectory])+'\n')
+
+    logger.report([x[0] for x in predicted_trajectory3d], cfg['orderjson'])
+
+    common.print_elapsed_time(True)
+    return True, {'predicted_3d_trajectories':predicted_trajectory3d}
+
+def draw_seeds( framepath, seedfile):
+    image = common.rasterio_read_as_rgb24(framepath)
+    seeds = object_tracking.load_detection(seedfile)[0]
+
+    if len(seeds) > 0:
+        common.draw(image, seeds, (0,255,0), kwargs={'showCoordinates':True})
+        cv2.putText(image, f'{os.path.basename(framepath)}', (0,image.shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+
+    return image
+    
+def draw_trajectory(frames, trajectory, label = None, color = (0, 255, 0)):
+    bg = frames
+    if isinstance(trajectory, str):
+        if label is None:
+            label = os.path.splitext(os.path.basename(trajectory))[0]
+        st, _, trajectory = object_tracking.load_tracking(trajectory)
+        trajectory = [(x[1], x[2]) for x in trajectory]
+        bg = frames[st:]
+
+    n = min(len(bg), len(trajectory))
+    for i in range(2, n):
+        common.draw( bg[i], trajectory[:i-1], color, kwargs={'linked':True, 'radius':1})
+        common.draw( bg[i], [trajectory[i]], color)
+
+    return frames
+
+def trajectory_video( output:str, trajectory: str, framedir : str, clip = True, margin = 256):
+    label = os.path.splitext(os.path.basename(trajectory))[0]
+    st, cnt, trajectory = object_tracking.load_tracking(trajectory)
+
+    if cnt == 0:
+        return
+
+    win = None
+    xy = np.array([[x[1], x[2]] for x in trajectory])
+
+    if clip:
+        width, height,_ = common.get_image_shape(os.path.join(framedir, trajectory[0][0]))
+        win = list(common.bounding_box2D(xy))
+        win[0] = max(0, win[0]-margin)
+        win[1] = max(0, win[1]-margin)
+        win[2] = min(width-win[0], win[2]+2*margin)
+        win[3] = min(height-win[1], win[3]+2*margin)
+        xy -= np.array([win[0], win[1]])
+
+    frames = []
+    for info in trajectory:
+        frames.append(common.rasterio_read_as_rgb24(os.path.join(framedir, info[0]), win))
+        cv2.putText(frames[-1], f'{info[0]}', (0,frames[-1].shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+
+    frames = draw_trajectory(frames, xy, label, common.generate_random_color(cnt))
+
+    height, width = frames[0].shape[:2]
+    video = cv2.VideoWriter(output, cv2.VideoWriter_fourcc(*'mp4v'), 1, (width, height))
+    for frame in frames:
+        video.write(frame)
+
+    video.release()
+
 
 if __name__ == "__main__":
     import sys

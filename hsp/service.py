@@ -11,6 +11,7 @@ import ast
 import input_check
 import json
 import pickle
+import requests
 
 
 app = Flask("HSP")
@@ -33,8 +34,12 @@ class Logger:
     def set_step(self, step):
         self.message["step"] = step
 
+    def report(self, message, text = None):
+        pass
     def set_taskid(self, taskid):
-        self.message["taskID"] = taskid
+        pass
+    def set_reportdir(self, reportdir):
+        pass
 
 class ServerLogger(Logger):
     def __init__(self, jobid, taskid, server):
@@ -42,9 +47,50 @@ class ServerLogger(Logger):
         self.message['jobID'] = jobid
         self.message['taskID'] = taskid
         self.server = server
+        self.reportdir = None
     def progress_update(self, progress):
         self.message["progress"] = progress
         server.add_message_to_queue(json.dumps(self.message))
+    def set_taskid(self, taskid):
+        self.message["taskID"] = taskid
+    def set_reportdir(self, reportdir):
+        self.reportdir = reportdir
+
+    def synchronous_report(self, product, text):
+        if text:
+            text = os.path.splitext(os.path.basename(text))[0]
+            report_path = os.path.join(self.reportdir, f'{text[:-5]}Status.json')
+            print(f'Status file created: {report_path}\n')
+        else:
+            report_path = os.path.join(self.reportdir, '{}_product_{}.json'.format(self.message['jobID'], os.path.splitext(os.path.basename(product))[0]))
+        with open(report_path, 'w') as f:
+            if isinstance(product, str):
+                jsondata = {"Result":{"status":"success"}, "ProductList": {"Product": [{"FilePath": product}, {"ImagesPath": ''}]} }
+            else:
+                jsondata = {"Result":{"status":"success"}, "ProductList": {"Product": [{"FilePath": p} for p in product] + [{"ImagesPath": ''}]} }
+            json.dump({'InterfaceFile':jsondata}, f, indent=4, ensure_ascii=False)
+
+        if text:
+            return 
+        
+        jsondata = {
+            "orderId": self.message['jobID'],
+            # "TaskID": self.message['taskID'],
+            "statusPath": report_path
+        }
+        try:
+            response = requests.post(
+                "http://192.168.2.105:8082/trajectory/xxclResultData",
+                json=jsondata
+            )
+            if response is not None:
+                print("响应内容:", response.json())
+        except Exception as e:
+            print(f"请求发生错误: {e}")
+
+    def report(self, product, text = None):
+        thread = threading.Thread(target=self.synchronous_report, args=(product, text), daemon=True)
+        thread.start()
 
 class Status(Enum):
     SUCCESS=200
@@ -60,10 +106,10 @@ class Action(Enum):
 algorithm = {
     "ID_WF_MBJC": workflow.detection_processing,
     "ID_WF_MBGZ": workflow.tracking_processing,
-    "ID_WF_GJSC": workflow.geolocating_process,
-    "ID_WF_GJRH": workflow.automatic_processing,
-    "ID_WF_MBSB": workflow.automatic_processing,
-    "ID_WF_GJYC": workflow.automatic_processing,
+    "ID_WF_GJSC": workflow.geolocating_processing,
+    "ID_WF_GJRH": workflow.geolocating_processing,
+    "ID_WF_MBSB": workflow.geolocating_processing,
+    "ID_WF_GJYC": workflow.trajectory_predicting_processing,
     "ID_WF_YWPG": workflow.automatic_processing,
     "ID_WF_SSCL": workflow.automatic_processing
 }
@@ -85,7 +131,7 @@ def message_processing():
     if job is None:
         if action != Action.START:
             return jsonify({"status":Status.ERROR.value, "message": "节点未运行", "result":{}})
-        tasklist[hdr[0]] = {'logger': ServerLogger(data.get('JobID'), taskid, server), 'share': dict()}
+        tasklist[hdr[0]] = {'logger': ServerLogger(data.get('JobID'), taskid, server), 'share': {'tasks' : []} }
         job = tasklist[hdr[0]]
         task = None
     else:
@@ -94,7 +140,7 @@ def message_processing():
             return jsonify({"status":Status.ERROR.value, "message": "上个节点未完成", "result":{}})
 
     if action == Action.START:
-        if task is not None and task[0] == taskid:
+        if task is not None and task[0] == taskid and task[1].is_paused():
             if not task[1].resume():
                 return jsonify({"status": Status.ERROR.value, "message": "节点重启失败", "result": {}})
             else:
@@ -103,12 +149,18 @@ def message_processing():
         if cfg is None:
             return jsonify({"status": Status.ERROR.value, "message": "读取订单文件失败", "result": {}})
         job[taskid] = Event()
+        job['logger'].set_taskid(taskid)
+        job['logger'].set_reportdir(cfg['output_dir'])
+        cfg['orderjson'] = data.get('OrderPath')
         flag, ret = algorithm[taskid]( cfg, job[taskid], job['logger'], job['share'])
         if flag :
+            job[taskid].finish()
+            job['share']['tasks'].append(taskid)
             with open( os.path.join(cfg['output_dir'], f'{hdr[0]}.pkl'), 'wb') as f:
-                pickle.dump(job, f)
+                pickle.dump(job['share'], f)
             return jsonify({"status": Status.SUCCESS.value, "message": "节点运行完成", "result": ret})
         else:
+            job[taskid].fail()
             return jsonify({"status": Status.ERROR.value, "message": ret, "result": {}})
     elif action == Action.PAUSE:
         assert(task is not None)
@@ -118,8 +170,8 @@ def message_processing():
     elif action == Action.KILL:
         assert(task is not None)
         if not task[1].terminate():
-            return jsonify({"status":Status.ERROR.value, "message": "节点中止失败", "result":{}})
-        return jsonify({"status":Status.SUCCESS.value, "message": "节点中止成功", "result":{}})
+            return jsonify({"status":Status.ERROR.value, "message": "节点终止失败", "result":{}})
+        return jsonify({"status":Status.SUCCESS.value, "message": "节点终止成功", "result":{}})
     else:
         return jsonify({"status":Status.ERROR.value, "message": "无效操作", "result":{}})
 
@@ -191,11 +243,11 @@ if __name__ == '__main__':
     flask_host = '127.0.0.1'
     flask_port = 7000
     if len(sys.argv) >= 3:
-        ws_host = sys.argv[1]
-        ws_port = int(sys.argv[2])
+        flask_host = sys.argv[1]
+        flask_port = int(sys.argv[2])
     if len(sys.argv) >= 5:
-        flask_host = sys.argv[3]
-        flask_port = int(sys.argv[4])
+        ws_host = sys.argv[3]
+        ws_port = int(sys.argv[4])
 
     ws_thread = threading.Thread(target=run_websocket_server, args=(ws_host, ws_port), daemon=True)
     ws_thread.start()
