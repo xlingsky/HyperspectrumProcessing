@@ -6,6 +6,7 @@ class WebSocketServer:
     def __init__(self):
         self.clients = set()
         self.message_queue = queue.Queue()  # Message queue
+        self._stop_event = asyncio.Event()
 
     async def register_client(self, websocket):
         self.clients.add(websocket)
@@ -16,14 +17,17 @@ class WebSocketServer:
         print(f"Client disconnected: {websocket.remote_address}")
 
     async def notify_clients(self, message):
-        try:
-            if self.clients:
-                for client in self.clients:
+        if self.clients:
+            invalid = []
+            for client in self.clients:
+                try:
                     await client.send(message)
-        except Exception as e:
-            self.clients.clear()
-            self.clients = set()
-            print(f"[Websocket ERROR]: {e}. Clear all clients.")
+                except Exception as e:
+                    print(f"[{client.remote_address} ERROR]: {e}. Clear it soon.")
+                    invalid.append(client)
+
+            for client in invalid:
+                self.clients.remove(client)
 
     async def send_progress(self, progress):
         message = f"Progress: {progress}%"
@@ -42,7 +46,7 @@ class WebSocketServer:
     async def sender(self, websocket):
         await self.register_client(websocket)
         try:
-            while True:
+            while not self._stop_event.is_set():
                 if not self.message_queue.empty():
                     message = self.message_queue.get_nowait()
                     await self.notify_clients(message)
@@ -63,6 +67,12 @@ class WebSocketServer:
                 print(f"Received message from client: {message}")
         finally:
             await self.unregister_client(websocket)
+
+    def stop(self):
+        self._stop_event.set()
+        if self.clients:
+            for client in self.clients:
+                client.close()
 
 # Example usage:
 if __name__ == "__main__":

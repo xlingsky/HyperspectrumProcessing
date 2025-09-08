@@ -502,11 +502,18 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                     batches = [( os.path.join(dir_output, f'M{st+i}.json' ), os.path.join( dir_tracking, trajectory[-1]), trajectory[-2] < 3 ) for i,trajectory in enumerate(new_trajectories) ]
                     parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, None, cfg, timeout=cfg['timeout'])
 
-                    trajectory3d += [(batch[0],) for batch in batches]
+                    new_trajectory3d = [(batch[0],batch[-1]) for batch in batches if os.path.exists(batch[0])]
+
+                    print('1e) predicting trajectories ...')
+                    batches = [( os.path.join(dir_output, f'M{st+i}_predicted.json' ), trajectory[0] ) for i,trajectory in enumerate(new_trajectory3d) ]
+                    parallel.launch_calls(trajectory_predicting, batches, nb_workers, cfg, timeout=cfg['timeout'])
+                    
+                    new_trajectory3d = [ (batch[0],) if os.path.exists(batch[0]) else newt for batch, newt in zip(batches,new_trajectory3d) ]
+                    trajectory3d += new_trajectory3d
 
                     num_trajectories = [len(x) for x in finished_trajectories]
 
-                    for batch in batches:
+                    for batch in new_trajectory3d:
                         logger.report(batch[0])
                 
                     common.print_elapsed_time()

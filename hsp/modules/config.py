@@ -11,7 +11,7 @@ DEFAULT_CFG = {
     'input_file_extensions': ['.tif', '.png'],
     'filewatcher_timeout': 30,
     'omp_num_threads': 1,
-    'batchsize': 15,
+    'batchsize': 100,
 
     'background_frame_number': 10,
     'background_method': 'mean',

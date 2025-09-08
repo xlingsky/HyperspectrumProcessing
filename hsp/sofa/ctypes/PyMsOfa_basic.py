@@ -10,23 +10,44 @@ import numpy.ctypeslib  as  nt
 import os
 import platform
 
-libs_dir = os.path.dirname(__file__)
-while True:
-    if os.path.exists(os.path.join(libs_dir, 'build')):
-        break
-    libs_dir = os.path.dirname(libs_dir)
+class DependencyError(Exception):
+    def __init__(self, package_name, install_command = None, message = None):
+        self.package_name = package_name
+        self.install_command = install_command or f"pip install {package_name}"
+        self.message = message or f"Required package '{package_name}' is not installed."
+        super().__init__(self.message)
 
-system = platform.system()
-if system == 'Linux':
-    lib_extension = '.so'
-elif system == 'Darwin':
-    lib_extension = '.dylib'
-else:
-    lib_extension = '.dll'
+    def __str__(self):
+        raise f"{self.message}\nPlease install with: {self.install_command}"
 
-libs_file  = 'libsofa'+lib_extension
-libs_path  = os.path.join(libs_dir, 'build', libs_file) 
-lib       = CDLL(libs_path)
+try:
+    libs_dir = os.path.dirname(__file__)
+    while True:
+        if os.path.exists(os.path.join(libs_dir, 'build')):
+            break
+        parent_dir = os.path.dirname(libs_dir)
+        if parent_dir == libs_dir:
+            break
+        else:
+            libs_dir = parent_dir
+
+    system = platform.system()
+    if system == 'Linux':
+        lib_extension = '.so'
+    elif system == 'Darwin':
+        lib_extension = '.dylib'
+    else:
+        lib_extension = '.dll'
+
+    libs_file  = 'libsofa'+lib_extension
+    libs_path  = os.path.join(libs_dir, 'build', libs_file) 
+    lib       = CDLL(libs_path)
+except:
+        raise DependencyError(
+            "libsofa",
+            "build from the sofa source code",
+            "libsofa is required for J2000 transformation."
+        )
 
 
 c_int4 = c_int * 4

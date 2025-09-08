@@ -46,15 +46,28 @@ class ServerLogger(Logger):
         super().__init__()
         self.message['jobID'] = jobid
         self.message['taskID'] = taskid
-        self.server = server
+        if server is None:
+            self.server = WebSocketServer()
+        else:
+            self.server = server
         self.reportdir = None
     def progress_update(self, progress):
         self.message["progress"] = progress
-        server.add_message_to_queue(json.dumps(self.message))
+        self.server.add_message_to_queue(json.dumps(self.message))
     def set_taskid(self, taskid):
         self.message["taskID"] = taskid
     def set_reportdir(self, reportdir):
         self.reportdir = reportdir
+
+    def start_server(self, host, port):
+        asyncio.run(self.server.run_server(host, port))
+
+    def async_server(self, host, port):
+        self.server_thread = threading.Thread(target=self.start_server, args=(host, port), daemon=True)
+        self.server_thread.start()
+
+    async def stop_server(self):
+        await self.server.stop()
 
     def synchronous_report(self, product, text):
         if text:
@@ -151,8 +164,10 @@ def message_processing():
         job[taskid] = Event()
         job['logger'].set_taskid(taskid)
         job['logger'].set_reportdir(cfg['output_dir'])
+        # job['logger'].async_server(ws_host, ws_port)
         cfg['orderjson'] = data.get('OrderPath')
         flag, ret = algorithm[taskid]( cfg, job[taskid], job['logger'], job['share'])
+        # job['logger'].stop_server()
         if flag :
             job[taskid].finish()
             job['share']['tasks'].append(taskid)
@@ -233,15 +248,16 @@ def analyze_images_endpoint():
 
 def run_websocket_server(host, port):
     asyncio.run(server.run_server(host, port))
+
 def run_flask(host, port):
     app.run(host=host, port=port, debug=False)
 
 if __name__ == '__main__':
     import sys
-    ws_host = '0.0.0.0'
-    ws_port = 9876
     flask_host = '127.0.0.1'
     flask_port = 7000
+    ws_host = '0.0.0.0'
+    ws_port = 8765
     if len(sys.argv) >= 3:
         flask_host = sys.argv[1]
         flask_port = int(sys.argv[2])
