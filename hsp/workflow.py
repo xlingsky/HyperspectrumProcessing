@@ -145,10 +145,11 @@ def anomaly_tracking( frameid : int, trackers : list,  seedfiles : list, params 
 
 def trajectory_file_refinement( trajectorydir, trajectoryname, framedir, config):
     trajectoryfile = os.path.join(trajectorydir, trajectoryname)
-    start, cnt, points = object_tracking.load_tracking(trajectoryfile)
-    trajectory = object_tracking.refine_trajectory(points, framedir, config)
+    hdrs, points = object_tracking.load_tracking(trajectoryfile)
+    trajectory, pca = object_tracking.refine_trajectory(points, framedir, config)
+    hdrs += pca
     with open(trajectoryfile, 'w') as f:
-        f.write('{} {}\n'.format(start, cnt))
+        f.write('\t'.join(str(x) for x in hdrs)+'\n')
         for pt in trajectory:
             f.write('{}\n'.format('\t'.join(f"{x:.2f}" if isinstance(x,float) else str(x) for x in pt)))
 
@@ -157,7 +158,9 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
     if not config['overwritten'] and os.path.exists(output):
         return
     with open(trajectory, 'r') as f:
-        start, cnt, points = object_tracking.load_tracking(trajectory)
+        hdrs, points = object_tracking.load_tracking(trajectory)
+        start = hdrs[0]
+        cnt = hdrs[1]
         
         if cnt <= 0:
             return 
@@ -165,7 +168,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         header_info = {
             "Category": {
                 "Name": "DD" if type else "FJ",
-                "Confidence": min(len(points)/100, 1),
+                "Confidence": min(len(hdrs)-3/int(hdrs[2]), 1),
                 "Classification":{
                     "Name" : "",
                     "BoostStage": "",
@@ -183,6 +186,8 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         sofa_transformer = config['sofa']
         points_info = output_info["PointList"]["Point"]
         locating = geometric_locating.Locating(os.path.join(framedir, points[0][0]))
+        if not locating.good:
+            return
         if type:
             height_range = 2*locating.height_scale()
             acceleration = min(2.5*9.8, 2*height_range/(cnt**2)) 
@@ -214,6 +219,8 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
 
                     j2000 = cgcs2j @ np.array(centric).reshape(3,1)
                     info['J2000'] = [j2000[0,0],j2000[1,0],j2000[2,0]]
+            else:
+                return
 
             points_info.append(info)
 
@@ -966,9 +973,9 @@ def draw_trajectory(frames, trajectory, label = None, color = (0, 255, 0)):
     if isinstance(trajectory, str):
         if label is None:
             label = os.path.splitext(os.path.basename(trajectory))[0]
-        st, _, trajectory = object_tracking.load_tracking(trajectory)
+        hdrs, trajectory = object_tracking.load_tracking(trajectory)
         trajectory = [(x[1], x[2]) for x in trajectory]
-        bg = frames[st:]
+        bg = frames[hdrs[0]:]
 
     n = min(len(bg), len(trajectory))
     for i in range(2, n):
@@ -979,9 +986,9 @@ def draw_trajectory(frames, trajectory, label = None, color = (0, 255, 0)):
 
 def trajectory_video( output:str, trajectory: str, framedir : str, clip = True, margin = 256):
     label = os.path.splitext(os.path.basename(trajectory))[0]
-    st, cnt, trajectory = object_tracking.load_tracking(trajectory)
+    hdrs, trajectory = object_tracking.load_tracking(trajectory)
 
-    if cnt == 0:
+    if hdrs[1] == 0:
         return
 
     win = None

@@ -34,10 +34,16 @@ def init(config : dict):
 
 class Locating:
     def __init__(self, rpcpath):
-        self.load_rpc(rpcpath)
+        self.rpc = None
+        if not self.load_rpc(rpcpath):
+            return
         lon, lat = self.rpc.lon_offset, self.rpc.lat_offset
         self.geographic_to_projection = pyproj.Transformer.from_crs(4326, compute_epsg(lon, lat), always_xy=True)
         self.geographic_to_geocentric = geographic_to_geocentric 
+
+    @property
+    def good(self) -> bool:
+        return self.rpc is not None
 
     def load_rpc(self, geotiff):
         try:

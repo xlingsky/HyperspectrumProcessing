@@ -2,7 +2,12 @@ import numpy as np
 from datetime import datetime
 from bisect import bisect_right
 import math
-import hsp.sofa.ctypes.PyMsOfa as sofa
+try:
+    import hsp.sofa.ctypes.PyMsOfa as sofa
+    SOFA_CTYPES = True
+except:
+    import hsp.sofa.python.PyMsOfa as sofa
+    SOFA_CTYPES = False
 
 # 闰秒表 (MJD, TAI-UTC)
 LEAP_SECONDS = [
@@ -159,7 +164,10 @@ class Transformer:
         eop = interpolate_eop(mjd, eop_list)
 
         # 计算djmjd0和date
-        djmjd0, date = sofa.pymCal2jd(year, month, day)
+        if SOFA_CTYPES:
+            djmjd0, date = sofa.pymCal2jd(year, month, day)
+        else:
+            djmjd0, date, _ = sofa.pymCal2jd(year, month, day)
 
         # 计算TT (地球时)
         # TT = UTC + DAT + 32.184

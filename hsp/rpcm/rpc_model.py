@@ -9,8 +9,8 @@ import numpy as np
 import pyproj
 import rasterio
 
-from rpcm import geo
-from rpcm.rpc_file_readers import read_rpc_file
+from hsp.rpcm import geo
+from hsp.rpcm.rpc_file_readers import read_rpc_file
 
 
 class MaxLocalizationIterationsError(Exception):

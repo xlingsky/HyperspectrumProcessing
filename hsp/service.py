@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from enum import Enum
 from hsp.modules.event import Event
-import workflow 
+from hsp import workflow 
 from hsp.modules.websocketserver import WebSocketServer
 import asyncio
 import threading
@@ -171,8 +171,11 @@ def message_processing():
         if flag :
             job[taskid].finish()
             job['share']['tasks'].append(taskid)
-            with open( os.path.join(cfg['output_dir'], f'{hdr[0]}.pkl'), 'wb') as f:
-                pickle.dump(job['share'], f)
+            try:
+                with open( os.path.join(cfg['output_dir'], f'{hdr[0]}.pkl'), 'wb') as f:
+                    pickle.dump(job['share'], f)
+            except Exception as e:
+                print(f'FAILED to save share data as pkl: {e}')
             return jsonify({"status": Status.SUCCESS.value, "message": "节点运行完成", "result": ret})
         else:
             job[taskid].fail()
@@ -221,15 +224,14 @@ def analyze_adsb():
         return jsonify({"status": 500, 'message': str(e)})
 
 @app.route('/inputCheck', methods=['POST'])
-def analyze_images_endpoint():
+def input_validating():
     folder_path = request.data.decode('utf-8').strip()
-    print(folder_path)
 
     if not folder_path:
-        return jsonify({"status": "500", 'error': 'No folder path provided'})
+        return jsonify({"status": Status.ERROR.value, 'error': 'No folder path provided'})
 
     if not os.path.exists(folder_path):
-        return jsonify({"status": "500", 'error': 'Folder does not exist'})
+        return jsonify({"status": Status.ERROR.value, 'error': 'Folder does not exist'})
 
     try:
         result = input_check.analyze_images(folder_path)

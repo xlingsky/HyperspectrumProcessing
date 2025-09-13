@@ -9,6 +9,7 @@
     "measurement_noise": 1e-1,
     "error_cov_post": 1.0,
     "max_missing_frames": 30,
-    "search_radius": 2.5
+    "search_radius": 2.5,
+    "response_dieout_ratio": 0.1
   }
 }

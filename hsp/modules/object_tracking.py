@@ -156,6 +156,8 @@ class KalmanTracker:
         self._missings = 0
         self._tolerance = params['max_missing_frames']
         self._search_radius = params['search_radius']
+        self._response_dieout_ratio = params['response_dieout_ratio']
+        self._response = 0
     
     @property
     def good(self) -> bool:
@@ -165,10 +167,14 @@ class KalmanTracker:
         return self._search_radius if self._missings == 0 else self._search_radius * 2
     
     def update(self, id: int, pt: np.ndarray):
+        if pt[2] < self._response*self._response_dieout_ratio:
+            self.missing(pt)
+            return
         self._point_ids.append(id)
         self._points.append(pt) 
         self.kf.correct(np.array([[pt[0]],[pt[1]]], dtype=np.float32))
         self._missings = 0
+        self._response = pt[2]
     
     def missing(self, pt: np.ndarray):
         self._point_ids.append(-1)
@@ -297,23 +303,21 @@ def save_tracking(directory: str, file: str, tracker: KalmanTracker, frames:list
     return [tracker._frame_start, len(tracker._points), np.max(tracker._curvature[0]), file]
 
 def load_tracking( file:str ):
-    frame_start = -1
-    cnt = 0
+    hdrs = []
     points = []
     try:
         with open(file, 'r') as f:
             lines = f.readlines()
             t = lines[0].strip().split()
-            frame_start = int(t[0])
-            cnt = int(t[1])
-            for i in range(cnt):
+            hdrs = [int(t[0]), int(t[1])] + [float(x) for x in t[2:]]
+            for i in range(hdrs[1]):
                 t = lines[i+1].strip().split()
                 t[1:-1] = [float(x) for x in t[1:-1]]
                 t[-1] = int(t[-1])
                 points.append(t)
     except Exception as e:
         print(f"[ERROR]: {e}")
-    return frame_start, cnt, points
+    return hdrs, points
 
 def compute_geometric_center(image_window):
     """
@@ -359,18 +363,47 @@ def interpolate(image, x, y):
     return top*(1-y_frac)+bottom*y_frac
 
 def refine_trajectory(trajectory: list, directory: str, config : dict):
-    sz = int(3)
+    sz = int(7)
     half_sz = sz // 2
+    pdf_size = 3
+    margin = (sz-pdf_size) // 2
+    flattened_images = []
     for i, pt in enumerate(trajectory):
         frame = os.path.join(directory, pt[0])
         try:
             img = rasterio.open(frame)
-            x, y = max(int(pt[1])-half_sz,0), max(int(pt[2])-half_sz,0)
-            xe, ye = min(x+sz, img.width), min(y+sz, img.height)
-            win = rasterio.windows.Window( x, y, xe-x, ye-y)
-            data = img.read(window=win)[0]
-            xo, yo = compute_geometric_center(data)
-            trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo), pt[-1]]
+            x = int(pt[1])-half_sz
+            y = int(pt[2])-half_sz
+            if x >= 0 and y >= 0:
+                xe = x+sz
+                ye = y+sz
+                if xe <= img.width and ye <= img.height:
+                    win = rasterio.windows.Window( x, y, xe-x, ye-y)
+                    data = img.read(window=win)[0]
+                    xo, yo = compute_geometric_center(data[margin:-margin, margin:-margin])
+                    xo += margin
+                    yo += margin
+                    trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo), pt[-1]]
+                    flattened_images.append(data.flatten())
+                    continue
+            data = img.read(window = rasterio.windows.Window(int(pt[1]),int(pt[2]), 1, 1) )
+            trajectory[i] = [pt[0], pt[1], pt[2], data[0,0], pt[-1]]
         except:
             continue
-    return trajectory
+    if len(flattened_images) < 3:
+        return trajectory, [1]
+
+    image_matrix = np.vstack(flattened_images)
+
+    # Perform PCA
+    pca = PCA()
+    pca.fit(image_matrix) # Fit PCA on our image data
+
+    # Calculate the cumulative explained variance ratio
+    # This tells us how much variance is captured by the first N components.
+    cumulative_variance = np.cumsum(pca.explained_variance_ratio_)
+
+    # Find the number of components needed for 95% variance
+    num_components_for_95 = np.argmax(cumulative_variance >= 0.95) + 1
+
+    return trajectory, [pca.n_components_]+list(cumulative_variance[:num_components_for_95])

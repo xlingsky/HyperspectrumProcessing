@@ -12,10 +12,10 @@
 "OperatorName":"sys",
 "Priority":"0",
 "UserType":"sys",
-"InputFile":"/Users/xlingsky/codespaces/HyperspectrumProcessing/data", 
+"InputFile":"/Users/xlingsky/Desktop/demo/added0610-1_WHreduced", 
 "LocalWorkDir":"/Users/xlingsky/Desktop/demo/803_tmp",
-"StartFrame": "10001.tif",
-"EndFrame": "10009.tif"
+"StartFrame": "",
+"EndFrame": ""
 },
 "Parameters":
 {"BackgroundFrames":"13",

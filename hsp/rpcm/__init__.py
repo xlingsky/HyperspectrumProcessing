@@ -1,17 +1,15 @@
-import os
 import warnings
 
 import numpy as np
 import rasterio
-import rasterio.warp
 
-from rpcm import rpc_model
-from rpcm import utils
-from rpcm.geo import compute_epsg
-from rpcm.rpc_model import RPCModel
-from rpcm.rpc_model import rpc_from_geotiff
-from rpcm.rpc_model import rpc_from_rpc_file
-from rpcm.__about__ import __version__
+from hsp.rpcm import rpc_model
+from hsp.rpcm import utils
+from hsp.rpcm.geo import compute_epsg
+from hsp.rpcm.rpc_model import RPCModel
+from hsp.rpcm.rpc_model import rpc_from_geotiff
+from hsp.rpcm.rpc_model import rpc_from_rpc_file
+from hsp.rpcm.__about__ import __version__
 
 
 warnings.filterwarnings("ignore",

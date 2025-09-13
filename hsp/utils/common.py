@@ -268,9 +268,9 @@ def normalize_to_8bit_rgb(image):
 
     return cv2.cvtColor(u8, cv2.COLOR_GRAY2BGR)
 
-def rasterio_read_as_rgb24(path, window=None):
+def rasterio_read_as_rgb24(path, window=None, out_shape = None):
     with rasterio.open(path, 'r') as src:
-        img = src.read(window=rasterio.windows.Window(*window) if window is not None else None)[0,:,:]
+        img = src.read(window=rasterio.windows.Window(*window) if window is not None else None, out_shape = out_shape)[0,:,:]
 
         return normalize_to_8bit_rgb(img)
 
