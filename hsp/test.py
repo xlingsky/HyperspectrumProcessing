@@ -39,6 +39,9 @@ def run_script_with_realtime_output(script_path, tag = None):
 
 if __name__ == "__main__":
 
+    workflow.trajectory_video('/Users/xlingsky/Desktop/demo/803_tmp/M1.mp4', '/Users/xlingsky/Desktop/demo/803_tmp/tracking/M1_points.txt', '/Users/xlingsky/Desktop/demo/added0610-1_WHreduced') 
+    exit(0)
+
     dirpath = os.path.dirname(__file__)
     share = dict()
     cfg = workflow.read_order_file(os.path.join(os.path.dirname( dirpath), "template/Order.json"))

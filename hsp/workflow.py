@@ -168,7 +168,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         header_info = {
             "Category": {
                 "Name": "DD" if type else "FJ",
-                "Confidence": min(len(hdrs)-3/int(hdrs[2]), 1),
+                "Confidence": min((len(hdrs)-3)/3*0.4, 1),
                 "Classification":{
                     "Name" : "",
                     "BoostStage": "",
@@ -1004,11 +1004,18 @@ def trajectory_video( output:str, trajectory: str, framedir : str, clip = True, 
         xy -= np.array([win[0], win[1]])
 
     frames = []
+    src_range = None
     for info in trajectory:
-        frames.append(common.rasterio_read_as_rgb24(os.path.join(framedir, info[0]), win))
-        cv2.putText(frames[-1], f'{info[0]}', (0,frames[-1].shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
+        image = common.rasterio_read_as_gray(os.path.join(framedir, info[0]), win)
+        if src_range is None:
+            src_range = common.get_minmax(image, (2, 98))
+        image = common.normalize(image, src_range, (0, 255)).astype(np.uint8)
+        frames.append(cv2.cvtColor(image, cv2.COLOR_GRAY2BGR))
 
-    frames = draw_trajectory(frames, xy, label, common.generate_random_color(cnt))
+    frames = draw_trajectory(frames, xy, label, common.generate_random_color(hdrs[1]))
+
+    for i,info in enumerate(trajectory):
+        cv2.putText(frames[i], f'{info[0]}', (0,frames[i].shape[0]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0))
 
     height, width = frames[0].shape[:2]
     video = cv2.VideoWriter(output, cv2.VideoWriter_fourcc(*'mp4v'), 1, (width, height))

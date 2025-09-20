@@ -168,7 +168,6 @@ class KalmanTracker:
     
     def update(self, id: int, pt: np.ndarray):
         if pt[2] < self._response*self._response_dieout_ratio:
-            self.missing(pt)
             return
         self._point_ids.append(id)
         self._points.append(pt) 
@@ -182,9 +181,19 @@ class KalmanTracker:
         self.kf.correct(np.array([[pt[0]],[pt[1]]], dtype=np.float32))
         self._missings += 1
     
-    def remove_all_missings(self):
+    def remove_all_missings(self, valid_end : int = 2):
         self._point_ids = self._point_ids[:len(self._point_ids) - self._missings]
         self._points = self._points[:len(self._points) - self._missings]
+        ridx = reversed(range(valid_end, len(self._points)+1))
+        for i in ridx:
+            if all(self._point_ids[j] >= 0 for j in range(i - valid_end, i)):
+                self._point_ids = self._point_ids[:i]
+                self._points = self._points[:i]
+                return True
+
+        self._point_ids = []
+        self._points = []
+        return False
     
     def estimate(self) -> np.ndarray:
         prediction = self.kf.predict()
@@ -235,10 +244,19 @@ class KalmanTracker:
         
         return True
 
+def find_seed(  trackerid, seedidx, neighbors, occupied):
+    for id in enumerate(seedidx):
+        if id < len(neighbors) and not occupied[id]:
+            tid = np.argmax(neighbors[id] >= trackerid)
+            if tid < len(neighbors[id]) and neighbors[id][tid] == trackerid:
+                return id
+
+    return -1
+
 # def tracking(seeds: List[np.ndarray], trackers: List[KalmanTracker], frameid: int, params: dict, ):
-def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dict, num_nn: int = 1):
+def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dict, num_nn: int = 3):
     """Track objects using Kalman filter and KD-tree"""
-    status = [0] * len(seeds)
+    occupied = [False] * len(seeds)
     
     if len(trackers) > 0:
         predicted_points = [tracker.estimate() for tracker in trackers]
@@ -249,25 +267,28 @@ def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dic
             return trackers
     
         # Build KD-tree
-        data = np.array(seeds)
-        kdtree = KDTree(data[:,:2])
+        kdtree_trackers = KDTree(np.array(predicted_points))
+        kdtree_seeds = KDTree(np.array(seeds)[:,:2])
     
-        for tracker, pt in zip(trackers,predicted_points):
-            # Find nearest neighbors
-            dist, idx = kdtree.query(pt, k=num_nn)
-
-            search_radius = tracker.search_radius()
-
-            if status[idx] == 0 and dist < search_radius:
-                seed_pt = data[idx]
-                tracker.update(idx, seed_pt)
-                status[idx] = 1
-            else:
-                tracker.missing(pt)
+        seed_neighbors = [kdtree_trackers.query(seed[:2], k=num_nn, distance_upper_bound=params['search_radius']*3)[1] for seed in seeds]
+        tracker_neighbors = [kdtree_seeds.query(predicted_points[i], k=num_nn, distance_upper_bound=params['search_radius']*3)[1] for i in range(len(trackers))]
+    
+        for i, pts in enumerate(tracker_neighbors):
+            flag = True 
+            for id in enumerate(pts):
+                if id < len(seeds) and not occupied[id]:
+                    tid = np.argmax(seed_neighbors[id] >= i)
+                    if tid < num_nn and seed_neighbors[id][tid] == i:
+                        if trackers[i].update(id, seeds[id]):
+                            occupied[id] = True
+                            flag = False
+                            break
+            if flag:
+                trackers[i].missing(pt)
     
     # Add new trackers for unused seeds
-    for i, used in enumerate(status):
-        if used == 0:
+    for i, used in enumerate(occupied):
+        if not used:
             trackers.append(KalmanTracker(frameid, i, seeds[i], params))
 
     return trackers
@@ -302,14 +323,28 @@ def save_tracking(directory: str, file: str, tracker: KalmanTracker, frames:list
 
     return [tracker._frame_start, len(tracker._points), np.max(tracker._curvature[0]), file]
 
+def load_tracking_header(f):
+    try:
+        if isinstance(f, str) :
+            if os.path.isfile(f):
+                file = open(f, 'r')
+                f = file.readline()
+        else:
+            f = f.readline()
+
+        t = f.strip().split()
+        return [int(t[0]), int(t[1])] + [float(x) for x in t[2:]]
+    except Exception as e:
+        print(f"[ERROR]: {e}")
+    return None
+
 def load_tracking( file:str ):
     hdrs = []
     points = []
     try:
         with open(file, 'r') as f:
             lines = f.readlines()
-            t = lines[0].strip().split()
-            hdrs = [int(t[0]), int(t[1])] + [float(x) for x in t[2:]]
+            hdrs = load_tracking_header(lines[0])
             for i in range(hdrs[1]):
                 t = lines[i+1].strip().split()
                 t[1:-1] = [float(x) for x in t[1:-1]]

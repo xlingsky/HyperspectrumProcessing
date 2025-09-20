@@ -3,6 +3,7 @@ xcode/
 data/
 __pycache__/
 .cache/
+.venv
 
 compile_commands.json
 launch.json

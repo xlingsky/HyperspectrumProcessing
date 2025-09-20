@@ -15,6 +15,7 @@ import numpy as np
 import rasterio
 import random
 import cv2
+from typing import Iterable
 
 
 # silent rasterio NotGeoreferencedWarning
@@ -259,20 +260,18 @@ def draw( image, seeds, color, text = None, kwargs = dict()):
 
     return image
 
-def normalize_to_8bit_rgb(image):
-    if image.dtype != np.float32:
-        image = image.astype(np.float32)
+def get_minmax(image : np.ndarray, cum_cutoff : tuple = (2, 98) ):
+    return np.percentile(image, [cum_cutoff[0], cum_cutoff[1]])
 
-    normalized = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
-    u8 = normalized.astype(np.uint8)
+def normalize(image : np.ndarray, src_range : Iterable, dst_range : Iterable = (0, 255)):
+    scale = (dst_range[1]-dst_range[0])/(src_range[1]-src_range[0])
+    return np.clip((image.astype(np.float32) - src_range[0])*scale + dst_range[0], dst_range[0], dst_range[1])
 
-    return cv2.cvtColor(u8, cv2.COLOR_GRAY2BGR)
-
-def rasterio_read_as_rgb24(path, window=None, out_shape = None):
+def rasterio_read_as_gray(path, window=None, out_shape = None):
     with rasterio.open(path, 'r') as src:
-        img = src.read(window=rasterio.windows.Window(*window) if window is not None else None, out_shape = out_shape)[0,:,:]
-
-        return normalize_to_8bit_rgb(img)
+        img = src.read(1, window=rasterio.windows.Window(*window) if window is not None else None, out_shape = out_shape)
+        return img
+    return None
 
 def get_image_shape(path):
     with rasterio.open(path, 'r') as src:

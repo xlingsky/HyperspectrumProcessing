@@ -1,6 +1,5 @@
 import numpy as np
 from scipy import interpolate
-import matplotlib.pyplot as plt
 
 def calculate_curvature_finite_difference(points):
     """
