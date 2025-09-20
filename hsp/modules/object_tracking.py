@@ -168,12 +168,13 @@ class KalmanTracker:
     
     def update(self, id: int, pt: np.ndarray):
         if pt[2] < self._response*self._response_dieout_ratio:
-            return
+            return False
         self._point_ids.append(id)
         self._points.append(pt) 
         self.kf.correct(np.array([[pt[0]],[pt[1]]], dtype=np.float32))
         self._missings = 0
         self._response = pt[2]
+        return True
     
     def missing(self, pt: np.ndarray):
         self._point_ids.append(-1)
@@ -275,7 +276,7 @@ def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dic
     
         for i, pts in enumerate(tracker_neighbors):
             flag = True 
-            for id in enumerate(pts):
+            for id in pts:
                 if id < len(seeds) and not occupied[id]:
                     tid = np.argmax(seed_neighbors[id] >= i)
                     if tid < num_nn and seed_neighbors[id][tid] == i:
@@ -284,7 +285,7 @@ def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dic
                             flag = False
                             break
             if flag:
-                trackers[i].missing(pt)
+                trackers[i].missing(predicted_points[i])
     
     # Add new trackers for unused seeds
     for i, used in enumerate(occupied):
