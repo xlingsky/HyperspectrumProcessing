@@ -7,11 +7,18 @@ from datetime import datetime, timedelta
 import multiprocessing
 import numpy as np
 import cv2
+import pandas as pd
+import io
+import matplotlib.pyplot as plt
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans'] 
+plt.rcParams['axes.unicode_minus'] = False  
+plt.rcParams['axes.formatter.useoffset'] = False  
+plt.rcParams['axes.formatter.use_mathtext'] = False  
 
 from hsp.modules.config import orderjson_to_config
 from hsp.utils.filewatcher import TimeoutFileWatcher
 from hsp.utils import parallel, common
-from hsp.modules import object_tracking, geometric_locating
+from hsp.modules import object_tracking, geometric_locating, trajectory_prediction
 
 from trajectory_evaluate import FJ_target, DD_target, map_values, read_json
 
@@ -62,6 +69,15 @@ def read_order_file(orderpath, findcfg = False):
             f.write(json.dumps(cfg, indent=2, ensure_ascii=False))
 
     return cfg
+
+def read_frametime_file(frametimefile):
+    try:
+        with open(frametimefile, 'r') as f:
+            lines = f.readlines()
+            ret = {}; [ret.setdefault((items := line.strip().split())[0], items[1:]) for line in lines[1:]]
+            return ret
+    except:
+        return {}
 
 def while_loop_with_events( process, total, batchsize, event, logger):
     progress = 0
@@ -153,6 +169,99 @@ def trajectory_file_refinement( trajectorydir, trajectoryname, framedir, config)
         for pt in trajectory:
             f.write('{}\n'.format('\t'.join(f"{x:.2f}" if isinstance(x,float) else str(x) for x in pt)))
 
+def export_trajectories_as_sheets(output, trajectory_files, time_to_framename, cfg):
+    dataframes = {}
+    summary = []
+    for file in trajectory_files:
+        with open(file, 'r') as f:
+            root = json.load(f)
+            points = root['Trajectory']['PointList']["Point"]
+            observation = [point for point in points if "Observed" in point["Type"]]
+            times = [point["Time"] for point in observation]
+            imcoords = [point["ImageCoordinates"] for point in observation]
+            dns = [point["DigitalNumber"] for point in observation]
+            energy = [point["Energy"] for point in observation]
+            geographic = np.array([point["Location"] for point in observation])
+            velocities = [point["Velocity"][:2] for point in observation]
+            content = {
+                "图像名": [time_to_framename[datetime.strptime(t, "%Y-%m-%d %H:%M:%S")] for t in times],
+                "时间": times,
+                "图像坐标x": [x[0] for x in imcoords], 
+                "图像坐标y": [x[1] for x in imcoords], 
+                "图像响应值": dns, 
+                "能量": energy, 
+                "经度": list(geographic[:,0]), 
+                "纬度": list(geographic[:,1]), 
+                "高度": list(geographic[:,2]), 
+                "向东速度": [x[0] for x in velocities],
+                "向北速度": [x[1] for x in velocities]
+            }
+            name = os.path.splitext(os.path.basename(file))[0]
+            dataframes[name] = pd.DataFrame(content)
+            vn = np.linalg.norm(np.array(velocities))
+            summary.append([name, observation[0], observation[-1], points[0], np.mean(np.array(energy)), np.mean(vn)])
+            plt.plot(geographic[:,0], geographic[:,1], color=np.random.rand(3,), label=name)
+
+    if len(dataframes) > 0:
+        try:
+            with pd.ExcelWriter(output) as writer:
+                for name, df in dataframes.items():
+                    df.to_excel(writer, sheet_name=name)
+        except:
+            dir = os.path.dirname(output)
+            for name, df in dataframes.items():
+                df.to_csv(os.path.join(dir, name+'.csv'))
+
+    return summary
+
+def export_trajectory_products(output_dir, trajectory_files, time_to_framename, event, logger, cfg):
+    batchsize = cfg.get('max_sheet_number')
+    if batchsize is None:
+       batchsize = min(len(trajectory_files), 20)
+
+    def batch_process(progress, num):
+        output_name = f"{os.path.splitext(os.path.basename(trajectory_files[progress]))[0]}_{os.path.splitext(os.path.basename(trajectory_files[progress+num-1]))[0]}.xlsx"
+        batch_process.ret += export_trajectories_as_sheets(os.path.join(output_dir, output_name), trajectory_files[progress:progress+num], time_to_framename, cfg)
+
+    np.random.seed(int(datetime.now().timestamp()))
+    plt.figure(figsize=(12,8))
+    batch_process.ret = []
+    while_loop_with_events(batch_process, len(trajectory_files), batchsize, event, logger)
+
+    plt.xlabel('经度')
+    plt.ylabel('纬度')
+    plt.grid(True)
+    plt.legend()
+
+    content = {
+        "目标": [r[0] for r in batch_process.ret],
+        "首点时间": [r[1]['Time'] for r in batch_process.ret],
+        "末点时间": [r[2]['Time'] for r in batch_process.ret],
+        "时长(s)": [(datetime.strptime(r[2]['Time'], "%Y-%m-%d %H:%M:%S")-datetime.strptime(r[1]['Time'], "%Y-%m-%d %H:%M:%S")).total_seconds() for r in batch_process.ret],
+        "首点经度(东经)": [r[1]['Location'][0] for r in batch_process.ret],
+        "首点纬度(北纬)": [r[1]['Location'][1] for r in batch_process.ret],
+        "目标能量(w/sr)": [r[4] for r in batch_process.ret],
+        "平均速度(m/s)": [r[5] for r in batch_process.ret],
+        "发射地点": [r[3]['Location'] for r in batch_process.ret],
+        "方向": [np.rad2deg(np.atan2(r[3]['Velocity'][1], r[3]['Velocity'][0])) for r in batch_process.ret],
+        "目标批次": [ 1 for _ in batch_process.ret]
+    }
+    df = pd.DataFrame(content)
+    try:
+        from openpyxl.drawing.image import Image
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format='png')
+        img_buffer.seek(0)
+        with pd.ExcelWriter(os.path.join(output_dir, '检测结果.xlsx')) as writer:
+            df.to_excel(writer, sheet_name="summary")
+            worksheet = writer.sheets["summary"]
+            worksheet.add_image(Image(img_buffer), 'A'+str(len(batch_process.ret) + 5))
+        img_buffer.close()
+    except:
+        df.to_csv(os.path.join(output_dir, '检测结果.csv'))
+        plt.savefig(os.path.join(output_dir, '检测结果.png'))
+
+    plt.close()
 
 def trajectory_locating( output, trajectory, type, framedir, frametime, config):
     if not config['overwritten'] and os.path.exists(output):
@@ -168,7 +277,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         header_info = {
             "Category": {
                 "Name": "DD" if type else "FJ",
-                "Confidence": min((len(hdrs)-3)/3*0.4, 1),
+                "Confidence": min((hdrs[3])/3*0.4, 1),
                 "Classification":{
                     "Name" : "",
                     "BoostStage": "",
@@ -198,7 +307,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         for i,point in enumerate(points):
             frame = os.path.join(framedir, point[0])
             info = {
-                "Time": frametime[start+i] if frametime is not None else datetime.fromtimestamp(os.path.getctime(frame)).strftime("%Y-%m-%d %H:%M:%S"),
+                "Time": frametime.get(point[0],datetime.fromtimestamp(os.path.getctime(frame))).strftime("%Y-%m-%d %H:%M:%S"),
                 "ImageCoordinates": [point[1],point[2]],
                 "DigitalNumber": point[3],
                 "Energy": point[3]*0.01
@@ -242,7 +351,6 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
 def trajectory_predicting(output, trajectory, config):
     if not config['overwritten'] and os.path.exists(output):
         return
-    import hsp.modules.trajectory_prediction as tp
     import pyproj
     from hsp.rpcm import compute_epsg
 
@@ -299,7 +407,7 @@ def trajectory_predicting(output, trajectory, config):
         velocities = np.gradient(points, axis=0)
         accelerations = np.linalg.norm(np.gradient(velocities, axis=0), axis=1)
 
-        is_two_stage, jump_index = tp.detect_acceleration_jump(accelerations)
+        is_two_stage, jump_index = trajectory_prediction.detect_acceleration_jump(accelerations)
 
         if is_two_stage:
             # 根据观测数据动态调整参数
@@ -317,7 +425,7 @@ def trajectory_predicting(output, trajectory, config):
             }
 
             # 匹配二级助推模型
-            match_start_time, correlation, mse, stage_info = tp.find_boost_phase_position(
+            match_start_time, correlation, mse, stage_info = trajectory_prediction.find_boost_phase_position(
                 accelerations, missile_model_params, 'two_stage', two_stage_params)
 
             # 使用二级助推参数进行后续计算
@@ -326,22 +434,22 @@ def trajectory_predicting(output, trajectory, config):
 
         else:
             # 单级助推
-            match_start_time, correlation, mse, stage_info = tp.find_boost_phase_position(
+            match_start_time, correlation, mse, stage_info = trajectory_prediction.find_boost_phase_position(
                 accelerations, missile_model_params, 'single')
             effective_model_params = missile_model_params
             stage_type = 'single'
 
         stop_altitude = config['ground_altitude']
-        launch_points = tp.estimate_launch_point_kinematic(
+        launch_points = trajectory_prediction.estimate_launch_point_kinematic(
             points, velocities, match_start_time, stop_altitude,
             effective_model_params, stage_type)
 
-        points_to_shutdown, shutdown_velocity_ecef = tp.estimate_shutdown_point_kinematic(
+        points_to_shutdown, shutdown_velocity_ecef = trajectory_prediction.estimate_shutdown_point_kinematic(
             points, velocities, accelerations, match_start_time,
             effective_model_params, stage_type)
 
         time_interval = 1
-        landing_points = tp.missile_impact_prediction(
+        landing_points = trajectory_prediction.missile_impact_prediction(
             points[-1] if len(points_to_shutdown) == 0 else points_to_shutdown[-1], shutdown_velocity_ecef, stop_altitude, time_interval)
 
         points_info = []
@@ -507,7 +615,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                     print('1f) geolocating trajectories ...')
                     st = num_trajectories[0]+num_trajectories[1]+1
                     batches = [( os.path.join(dir_output, f'M{st+i}.json' ), os.path.join( dir_tracking, trajectory[-1]), trajectory[-2] < 3 ) for i,trajectory in enumerate(new_trajectories) ]
-                    parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, None, cfg, timeout=cfg['timeout'])
+                    parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, {}, cfg, timeout=cfg['timeout'])
 
                     new_trajectory3d = [(batch[0],batch[-1]) for batch in batches if os.path.exists(batch[0])]
 
@@ -642,7 +750,7 @@ def detection_processing(cfg, event, logger, share):
         print('2b) detecting anomaly objects ...')
         parallel.launch_calls(anomaly_detection, anomaly_batches, nb_workers, cfg, timeout=cfg['timeout'])
 
-        output_prefix += [x[0] for x in anomaly_batches]
+        output_prefix += [os.path.basename(x[0]) for x in anomaly_batches]
 
         progress = frame_ed
         logger.progress_update(progress)
@@ -808,9 +916,10 @@ def geolocating_processing(cfg, event, logger, share):
     dir_tracking = os.path.join(wsdir, object_tracking.TRACKING_DIRNAME)
     dir_geoloc = os.path.join(wsdir, geometric_locating.GEOLOCATION_DIRNAME)
     dir_input = cfg['input_dir']
-    dir_output = cfg['output_dir']
+    dir_output = os.path.join(cfg['output_dir'], geometric_locating.GEOLOCATION_DIRNAME)
 
     os.makedirs(dir_geoloc, exist_ok=True)
+    os.makedirs(dir_output, exist_ok=True)
 
     trajectories = [os.path.join(cfg['output_dir'], 'tracking_point_list.csv'), os.path.join(cfg['output_dir'], 'tracking_line_list.csv')]
     for i,file in enumerate(trajectories):
@@ -840,7 +949,12 @@ def geolocating_processing(cfg, event, logger, share):
             return False, "目标跟踪文件载入失败"
         trajectories[i] = [ [ float(info[0]), os.path.join(dir_tracking, info[-1])] for info in files]
 
-    frametime = None
+    frameinfo = read_frametime_file(os.path.join(dir_input, 'Infrared-result.log'))
+    if len(frameinfo) == 0:
+        frametime = {}
+        print(f"[WARNING]: No Infrared-result.log found! Using frame creation time instead.")
+    else:
+        frametime = { k:datetime.strptime(v[1]+' '+v[2], '%Y-%m-%d %H:%M:%S') for k,v in frameinfo.items() }
 
     print('2) geolocating trajectories ... ')
     logger.set_step(1)
@@ -854,7 +968,7 @@ def geolocating_processing(cfg, event, logger, share):
     while progress < filecount:
         num = min(batchsize, filecount-progress)
 
-        batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], trajectory[0] < 3 ) for i,trajectory in enumerate(trajectories[progress:progress+num]) ]
+        batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], trajectory[0] < 0.008 ) for i,trajectory in enumerate(trajectories[progress:progress+num]) ]
         parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, frametime, cfg, timeout=cfg['timeout'])
 
         trajectory3d += [(batch[0],) for batch in batches if os.path.exists(batch[0])]
@@ -875,6 +989,8 @@ def geolocating_processing(cfg, event, logger, share):
         for trajectory in trajectory3d:
             f.write(','.join([str(x) for x in trajectory])+'\n')
 
+    export_trajectory_products(cfg['output_dir'], [x[0] for x in trajectory3d], {v:k for k,v in frametime.items()}, event, logger, cfg)
+    
     logger.report([x[0] for x in trajectory3d], cfg['orderjson'])
 
     common.print_elapsed_time(True)
@@ -898,7 +1014,9 @@ def trajectory_predicting_processing(cfg, event, logger, share):
         batchsize = cfg['batchsize']
 
     dir_input = cfg['input_dir']
-    dir_output = cfg['output_dir']
+    dir_output = os.path.join(cfg['output_dir'], trajectory_prediction.TRAJECTORY_PREDICTION_DIRNAME)
+
+    os.makedirs(dir_output, exist_ok=True)
 
     share['predicted_3d_trajectories'] = list()
     if not share.get('3d_trajectories'):
@@ -907,7 +1025,8 @@ def trajectory_predicting_processing(cfg, event, logger, share):
     predicted_trajectory3d = share['predicted_3d_trajectories']
 
     if len(trajectory3d) == 0:
-        files = os.path.join(dir_output, 'targets.csv')
+        dir_locating = os.path.join(cfg['output_dir'], geometric_locating.GEOLOCATION_DIRNAME)
+        files = os.path.join(dir_locating, 'targets.csv')
         if not os.path.exists(files):
             newfile_callback.files = list()
             common.scan_existing_files(dir_input, newfile_callback)

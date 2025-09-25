@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from hsp.modules.geometric_locating import transform_geocentric_to_geographic, transform_geographic_to_geocentric
 import json
 
+TRAJECTORY_PREDICTION_DIRNAME = 'prediction'
+
 # 地球相关常数
 GM = 3.986004418e14  # 地球引力参数 m³/s²
 g = 9.81  # 重力加速度 m/s²

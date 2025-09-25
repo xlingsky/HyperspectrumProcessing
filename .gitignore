@@ -5,6 +5,7 @@ __pycache__/
 .cache/
 .venv
 
+uv.lock
 compile_commands.json
 launch.json
 .DS_Store

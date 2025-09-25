@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "flask>=3.1.2",
+    "gdal>=3.11.3",
     "opencv-python>=4.12.0.88",
+    "openpyxl>=3.1.5",
     "pandas>=2.3.2",
     "pyproj>=3.7.2",
     "rasterio>=1.4.3",

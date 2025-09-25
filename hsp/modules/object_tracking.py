@@ -419,7 +419,8 @@ def refine_trajectory(trajectory: list, directory: str, config : dict):
                     xo, yo = compute_geometric_center(data[margin:-margin, margin:-margin])
                     xo += margin
                     yo += margin
-                    trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo), pt[-1]]
+                    vmean = np.mean(data)
+                    trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo)-vmean, pt[-1]]
                     flattened_images.append(data.flatten())
                     continue
             data = img.read(window = rasterio.windows.Window(int(pt[1]),int(pt[2]), 1, 1) )
@@ -442,4 +443,4 @@ def refine_trajectory(trajectory: list, directory: str, config : dict):
     # Find the number of components needed for 95% variance
     num_components_for_95 = np.argmax(cumulative_variance >= 0.95) + 1
 
-    return trajectory, [pca.n_components_]+list(cumulative_variance[:num_components_for_95])
+    return trajectory, [pca.n_components_, num_components_for_95]

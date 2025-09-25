@@ -102,17 +102,17 @@ class RPCModel:
                 or "rpcm" if read from the .__dict__ of an RPCModel object.
         """
         if dict_format == "geotiff":
-            self.row_offset = float(d['LINE_OFF'])
-            self.col_offset = float(d['SAMP_OFF'])
-            self.lat_offset = float(d['LAT_OFF'])
-            self.lon_offset = float(d['LONG_OFF'])
-            self.alt_offset = float(d['HEIGHT_OFF'])
+            self.row_offset = float(d['LINE_OFF'].split()[0])
+            self.col_offset = float(d['SAMP_OFF'].split()[0])
+            self.lat_offset = float(d['LAT_OFF'].split()[0])
+            self.lon_offset = float(d['LONG_OFF'].split()[0])
+            self.alt_offset = float(d['HEIGHT_OFF'].split()[0])
 
-            self.row_scale = float(d['LINE_SCALE'])
-            self.col_scale = float(d['SAMP_SCALE'])
-            self.lat_scale = float(d['LAT_SCALE'])
-            self.lon_scale = float(d['LONG_SCALE'])
-            self.alt_scale = float(d['HEIGHT_SCALE'])
+            self.row_scale = float(d['LINE_SCALE'].split()[0])
+            self.col_scale = float(d['SAMP_SCALE'].split()[0])
+            self.lat_scale = float(d['LAT_SCALE'].split()[0])
+            self.lon_scale = float(d['LONG_SCALE'].split()[0])
+            self.alt_scale = float(d['HEIGHT_SCALE'].split()[0])
 
             self.row_num = list(map(float, d['LINE_NUM_COEFF'].split()))
             self.row_den = list(map(float, d['LINE_DEN_COEFF'].split()))

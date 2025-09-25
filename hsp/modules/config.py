@@ -7,7 +7,7 @@ DEFAULT_CFG = {
     'clean_tmp': True,
     'max_processes': None,
     'timeout': 1800,
-    'overwritten': False,
+    'overwritten': True,
     'input_file_extensions': ['.tif', '.png'],
     'filewatcher_timeout': 30,
     'omp_num_threads': 1,
