@@ -45,7 +45,7 @@ if __name__ == "__main__":
     dirpath = os.path.dirname(__file__)
     share = dict()
     cfg = workflow.read_order_file(os.path.join(os.path.dirname( dirpath), "template/Order.json"))
-    workflow.tracking_processing( cfg, service.Event(), service.Logger(), share)
+    workflow.geolocating_processing( cfg, service.Event(), service.Logger(), share)
 
     exit(0)
 

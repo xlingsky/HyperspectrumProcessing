@@ -120,6 +120,60 @@ def detect_anomaly( image, configdir, bg, output_prefix, output_feature = True):
     except Exception as e:
         print(f"[ERROR]: {e}")
 
+class GlobalOffsetList:
+    def __init__(self, frame_id: int = 0, offset: np.ndarray = np.zeros(2), point_set: List = []):
+        self.start_frame_id = frame_id
+        self.start_offset = offset
+        self.last_point_set = point_set
+        self.last_offset_id = 0
+        self.offsets = [np.zeros(2)]
+
+    def offset(self, frame_id: int) -> np.ndarray:
+        assert frame_id >= self.start_frame_id and frame_id < self.start_frame_id + len(self.offsets)
+        return self.offsets[frame_id-self.start_frame_id]
+
+    def global_offset(self, frame_id: int) -> np.ndarray:
+        return self.start_offset + self.offset(frame_id)
+    
+    def append(self, point_set: List):
+        if len(point_set) < 3 :
+            self.offsets.append(self.offsets[self.last_offset_id])
+            return
+        elif len(self.last_point_set) < 3 :
+            offset = np.zeros(2)
+        else:
+            points = np.concatenate( (np.array(self.last_point_set)[:,:2], np.array(point_set)[:,:2]), axis=0 )
+            xmin, ymin = points.min(axis=0)
+            xmax, ymax = points.max(axis=0)
+            width = np.ceil(xmax - xmin+1).astype(np.int32)
+            height = np.ceil(ymax - ymin+1).astype(np.int32)
+            ref = np.zeros((height, width), dtype=np.uint8)
+            for p in self.last_point_set:
+                x = int(np.round(p[0]-xmin))
+                y = int(np.round(p[1]-ymin))
+                ref[y,x] = 1
+            src = np.zeros((height, width), dtype=np.uint8)
+            for p in point_set:
+                x = int(np.round(p[0]-xmin))
+                y = int(np.round(p[1]-ymin))
+                src[y,x] = 1
+            pad_width = max(len(self.offsets)-self.last_offset_id, 5)
+            padded = np.pad(src, pad_width=pad_width, mode='constant', constant_values=0)
+            res = cv2.matchTemplate(padded, ref, cv2.TM_SQDIFF)
+            min_val, _, min_loc, _ = cv2.minMaxLoc(res)
+            if min_val < 0.2*max(len(self.last_point_set), len(point_set)):
+                offset = np.array([pad_width, pad_width]) - np.array(min_loc)
+            else:
+                offset = np.zeros(2)
+        self.offsets.append(offset+self.offsets[self.last_offset_id])
+        self.last_point_set = point_set
+        self.last_offset_id = len(self.offsets)-1
+
+    def save(self, filename: str):
+        with open(filename, 'w') as f:
+            for offset in self.offsets:
+                f.write('{0} {1}\n'.format(offset[0], offset[1]))
+
 class KalmanTracker:
     def __init__(self, frame_start: int, ptid: int, pt: np.ndarray, params: dict):
         # State vector: [x, y, vx, vy] - position (x,y) and velocity (vx,vy)
@@ -206,47 +260,43 @@ class KalmanTracker:
         data = np.array([[x[0], x[1]] for x in self._points], dtype=np.float32)
         return curvature.calculate_angular_acceleration(data)
     
-    def is_valid(self, min_frame_number: int, min_speed: float, max_acceleration: float, curvature: str) -> bool:
+    def is_valid(self, offsets : GlobalOffsetList, min_frame_number: int, min_speed: float, max_acceleration: float, curvature: str) -> bool:
         if len(self._points) < min_frame_number:
             return False
         
-        distance = 0.0
-        speeds = []
-        
-        for i in range(1, len(self._points)):
-            pt1 = self._points[i - 1]
-            pt2 = self._points[i]
-            dx = pt2[0] - pt1[0]
-            dy = pt2[1] - pt1[1]
-            v = dx if abs(dx) > abs(dy) else dy
-            speeds.append(v)
-            distance += abs(v)
-            
-            if (distance - i * min_speed) < -1:
-                return False
-        
-        if len(self._points) > 5:
-            data = np.array(speeds, dtype=np.float32).reshape(1, -1)
-            min_val, max_val = np.min(data), np.max(data)
-            
-            if min_val < 0 and max_val > 0:
-                hist_size = max(5, int(np.ceil(max_val - min_val)))
-                hist_range = (min_val, max_val)
-                hist = cv2.calcHist(data, [0], None, [hist_size], hist_range)
-                
-                id0 = int(-hist_size * min_val / (max_val - min_val))
-                if hist[id0] > max_acceleration * len(self._points):
-                    return False
-                
-                if hist[0] + hist[hist_size - 1] > max_acceleration * len(self._points):
-                    return False
+        rx = [x[2] for x,id in zip(self._points, self._point_ids) if id >= 0]
+        if len(rx) < 0.5 * len(self._points):
+            return False
+
+        if np.count_nonzero(np.array(rx)>100) < 0.6 * len(rx):
+            return False
+
+        spacing = []
+        xy = []
+        for i in range(len(self._points)):
+            if self._point_ids[i] >= 0:
+                spacing.append(i)
+                xy.append(np.array(self._points[i][:2])+offsets.global_offset(self._frame_start+i))
+        xy = np.array(xy, dtype=np.float32)
+        xmin, ymin = xy.min(axis=0)
+        xmax, ymax = xy.max(axis=0) 
+        xlen = np.ceil(xmax - xmin)
+        ylen = np.ceil(ymax - ymin)
+
+        if len(xy) > 2*max(xlen, ylen):
+            return False
+
+        v = np.gradient(xy, spacing, axis=0)
+        vn = np.linalg.norm(v, axis=1)
+        if np.count_nonzero(vn < min_speed) > 0.3 * len(vn):
+            return False
 
         self._curvature = self.curvature(curvature)
         
         return True
 
 def find_seed(  trackerid, seedidx, neighbors, occupied):
-    for id in enumerate(seedidx):
+    for id in seedidx:
         if id < len(neighbors) and not occupied[id]:
             tid = np.argmax(neighbors[id] >= trackerid)
             if tid < len(neighbors[id]) and neighbors[id][tid] == trackerid:
@@ -415,7 +465,7 @@ def refine_trajectory(trajectory: list, directory: str, config : dict):
                 ye = y+sz
                 if xe <= img.width and ye <= img.height:
                     win = rasterio.windows.Window( x, y, xe-x, ye-y)
-                    data = img.read(window=win)[0]
+                    data = img.read(1, window=win)
                     xo, yo = compute_geometric_center(data[margin:-margin, margin:-margin])
                     xo += margin
                     yo += margin
@@ -423,12 +473,12 @@ def refine_trajectory(trajectory: list, directory: str, config : dict):
                     trajectory[i] = [pt[0], x+xo, y+yo, interpolate(data, xo, yo)-vmean, pt[-1]]
                     flattened_images.append(data.flatten())
                     continue
-            data = img.read(window = rasterio.windows.Window(int(pt[1]),int(pt[2]), 1, 1) )
+            data = img.read(1, window = rasterio.windows.Window(int(pt[1]),int(pt[2]), 1, 1) )
             trajectory[i] = [pt[0], pt[1], pt[2], data[0,0], pt[-1]]
         except:
             continue
     if len(flattened_images) < 3:
-        return trajectory, [1]
+        return trajectory, [0,0]
 
     image_matrix = np.vstack(flattened_images)
 

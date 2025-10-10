@@ -146,7 +146,7 @@ def anomaly_detection( output_prefix, image, background, config):
 
     object_tracking.detect_anomaly( image, os.path.dirname(output_prefix), background, output_prefix, config['debug'])
 
-def anomaly_tracking( frameid : int, trackers : list,  seedfiles : list, params : dict, load_file):
+def anomaly_tracking( frameid : int, trackers : list,  seedfiles : list, offsets : object_tracking.GlobalOffsetList, params : dict, load_file):
     trackers_finished = []
     for i, file in enumerate(seedfiles):
         seeds = load_file(file)
@@ -154,7 +154,7 @@ def anomaly_tracking( frameid : int, trackers : list,  seedfiles : list, params 
         for tracker in trackers:
             if not tracker.good :
                 tracker.remove_all_missings()
-                if tracker.is_valid(params['min_frame_number'], params['min_speed'], params['max_acceleration'], params.get('curvature','spline')):
+                if tracker.is_valid(offsets, params['min_frame_number'], params['min_speed'], params['max_acceleration'], params.get('curvature','spline')):
                     trackers_finished.append(tracker)
         trackers = [tracker for tracker in trackers if tracker.good]
     return trackers_finished, trackers
@@ -243,7 +243,7 @@ def export_trajectory_products(output_dir, trajectory_files, time_to_framename, 
         "目标能量(w/sr)": [r[4] for r in batch_process.ret],
         "平均速度(m/s)": [r[5] for r in batch_process.ret],
         "发射地点": [r[3]['Location'] for r in batch_process.ret],
-        "方向": [np.rad2deg(np.atan2(r[3]['Velocity'][1], r[3]['Velocity'][0])) for r in batch_process.ret],
+        "方向": [np.rad2deg(np.arctan2(r[3]['Velocity'][1], r[3]['Velocity'][0])) for r in batch_process.ret],
         "目标批次": [ 1 for _ in batch_process.ret]
     }
     df = pd.DataFrame(content)
@@ -258,7 +258,7 @@ def export_trajectory_products(output_dir, trajectory_files, time_to_framename, 
             worksheet.add_image(Image(img_buffer), 'A'+str(len(batch_process.ret) + 5))
         img_buffer.close()
     except:
-        df.to_csv(os.path.join(output_dir, '检测结果.csv'))
+        df.to_csv(os.path.join(output_dir, '检测结果.csv'), encoding='utf-8-sig')#gbk
         plt.savefig(os.path.join(output_dir, '检测结果.png'))
 
     plt.close()
@@ -277,7 +277,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         header_info = {
             "Category": {
                 "Name": "DD" if type else "FJ",
-                "Confidence": min((hdrs[3])/3*0.4, 1),
+                "Confidence": 0,
                 "Classification":{
                     "Name" : "",
                     "BoostStage": "",
@@ -295,6 +295,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         sofa_transformer = config['sofa']
         points_info = output_info["PointList"]["Point"]
         locating = geometric_locating.Locating(os.path.join(framedir, points[0][0]))
+        fixed_point_loc = []
         if not locating.good:
             return
         if type:
@@ -322,6 +323,9 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
                 info['Location'] = [graphic[0],graphic[1],z]
                 info['Projection'] = [proj[0], proj[1], z]
                 info['CGCS2000'] = [centric[0],centric[1],centric[2]]
+
+                _, fixed_proj, _ = locating.transform(points[0][1], points[0][2], z0)
+                fixed_point_loc.append(fixed_proj)
             
                 if sofa_transformer is not None:
                     cgcs2j = np.linalg.inv(sofa_transformer.j2000_to_cgcs2000_matrix(info['Time'])) 
@@ -344,6 +348,16 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         for i in range(len(points_info)):
             points_info[i]['Velocity'] = list(vx[i])
             points_info[i]['Type'] = 'Observed'
+
+        proj = np.array(fixed_point_loc)[:, :2]
+        proj -= proj[0]
+        proj_filtered = geometric_locating.filter_2d_points(proj, window_size=min(31,len(proj)))
+        v = np.gradient(proj_filtered, axis=0)
+        vn = np.linalg.norm(v, axis=1)
+        validv = np.count_nonzero(vn < 200)
+
+        header_info['Category']['Confidence'] = min((hdrs[3])/3*0.25, 0.5)+min(validv/len(vn)/0.8*0.5, 0.5)
+
 
         with open(output, 'w') as fout: 
             json.dump({"Header":header_info, "Trajectory":output_info}, fout, indent=2, ensure_ascii=False)
@@ -552,6 +566,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
         finished_trajectories = share['finished_trajectories']
         trajectory3d = share['3d_trajectories']
         num_trajectories = [0,0]
+        global_offsets = object_tracking.GlobalOffsetList()
         while file_watcher.is_alive() or progress < len(files):
             filecount = min(len(files), progress + batchsize)
             newfile_count = filecount-progress
@@ -581,9 +596,14 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                 parallel.launch_calls(anomaly_detection, anomaly_batches, nb_workers, cfg, timeout=cfg['timeout'])
 
                 print('1c) tracking anomaly objects ...')
+                for x in anomaly_batches:
+                    seedfile = x[0]+cfg['detection_output_postfix'][0]
+                    seeds = object_tracking.load_detection(seedfile)[0]
+                    global_offsets.append(seeds)
+
                 for i, detection_postfix in enumerate(cfg['detection_output_postfix']):
                     seedfiles = [x[0]+detection_postfix for x in anomaly_batches]
-                    finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, tracking_params, object_tracking.load_detection)
+                    finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, global_offsets, tracking_params, object_tracking.load_detection)
                     for tracker in finished:
                         name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
                         finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, files))
@@ -594,7 +614,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                             continue
                         for tracker in trajectories:
                             tracker.remove_all_missings()
-                            if tracker.is_valid(tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
+                            if tracker.is_valid( global_offsets, tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
                                 name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
                                 finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, files))
                         trackers[i].clear()
@@ -835,13 +855,18 @@ def tracking_processing(cfg, event, logger, share):
 
     frames = [os.path.basename(x)[:-len(cfg['detection_output_postfix'][0])] for x in summary_files[0]]
 
+    global_offsets = object_tracking.GlobalOffsetList()
     progress = 0
     while progress < filecount:
         num = min(batchsize, filecount-progress)
 
+        for seedfile in summary_files[0][progress:progress+num]:
+            seeds = object_tracking.load_detection(seedfile)[0]
+            global_offsets.append(seeds)
+
         for i, postfix in enumerate(cfg['tracking_output_postfix']):
             seedfiles = summary_files[i][progress:progress+num]
-            finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, tracking_params, object_tracking.load_detection)
+            finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, global_offsets, tracking_params, object_tracking.load_detection)
             for tracker in finished:
                 name = 'M{}{}'.format(len(finished_trajectories[i])+1, postfix)
                 finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, frames))
@@ -862,10 +887,12 @@ def tracking_processing(cfg, event, logger, share):
             continue
         for tracker in trajectories:
             tracker.remove_all_missings()
-            if tracker.is_valid(tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
+            if tracker.is_valid(global_offsets, tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
                 name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
                 finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, frames))
         trackers[i].clear()
+
+    global_offsets.save(os.path.join(dir_tracking, 'global_offsets.txt'))
     
     print('3) collecting tracking results ...')
     trajectories = [item for sublist in finished_trajectories for item in sublist]
@@ -971,7 +998,16 @@ def geolocating_processing(cfg, event, logger, share):
         batches = [( os.path.join(dir_output, f'M{progress+i+1}.json' ), trajectory[1], trajectory[0] < 0.008 ) for i,trajectory in enumerate(trajectories[progress:progress+num]) ]
         parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, frametime, cfg, timeout=cfg['timeout'])
 
-        trajectory3d += [(batch[0],) for batch in batches if os.path.exists(batch[0])]
+        valid = []
+        for batch in batches:
+            try:
+                with open(batch[0], 'r') as f:
+                    data = json.load(f)
+                    confidence = data['Header']['Category']['Confidence']
+                    valid.append( (batch[0], confidence) )
+            except:
+                continue
+        trajectory3d += valid
 
         progress += num
         logger.progress_update(progress)
