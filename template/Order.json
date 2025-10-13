@@ -12,13 +12,13 @@
 "OperatorName":"sys",
 "Priority":"0",
 "UserType":"sys",
-"InputFile":"/Users/xlingsky/Desktop/demo/added0610-1_WHreduced", 
+"InputFile":"/Users/xlingsky/Desktop/demo/G3-translate", 
 "LocalWorkDir":"/Users/xlingsky/Desktop/demo/803_tmp",
 "StartFrame": "",
 "EndFrame": ""
 },
 "Parameters":
-{"BackgroundFrames":"13",
+{"BackgroundFrames":"30",
 "TargetMaximumSize":"400",
 "MaxMissingFrames":"30",
 "MinDetectionFrames":"30",

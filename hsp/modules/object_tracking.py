@@ -125,8 +125,8 @@ class GlobalOffsetList:
         self.start_frame_id = frame_id
         self.start_offset = offset
         self.last_point_set = point_set
-        self.last_offset_id = 0
-        self.offsets = [np.zeros(2)]
+        self.last_offset_id = -1
+        self.offsets = []
 
     def offset(self, frame_id: int) -> np.ndarray:
         assert frame_id >= self.start_frame_id and frame_id < self.start_frame_id + len(self.offsets)
@@ -136,8 +136,9 @@ class GlobalOffsetList:
         return self.start_offset + self.offset(frame_id)
     
     def append(self, point_set: List):
+        last_offset = np.zeros(2) if self.last_offset_id < 0 else self.offsets[self.last_offset_id]
         if len(point_set) < 3 :
-            self.offsets.append(self.offsets[self.last_offset_id])
+            self.offsets.append(last_offset)
             return
         elif len(self.last_point_set) < 3 :
             offset = np.zeros(2)
@@ -165,7 +166,7 @@ class GlobalOffsetList:
                 offset = np.array([pad_width, pad_width]) - np.array(min_loc)
             else:
                 offset = np.zeros(2)
-        self.offsets.append(offset+self.offsets[self.last_offset_id])
+        self.offsets.append(offset+last_offset)
         self.last_point_set = point_set
         self.last_offset_id = len(self.offsets)-1
 
@@ -283,7 +284,7 @@ class KalmanTracker:
         xlen = np.ceil(xmax - xmin)
         ylen = np.ceil(ymax - ymin)
 
-        if len(xy) > 2*max(xlen, ylen):
+        if len(xy) > 2*max(xlen, ylen)/min_speed:
             return False
 
         v = np.gradient(xy, spacing, axis=0)
