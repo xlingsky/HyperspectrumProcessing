@@ -97,6 +97,7 @@ def generate_tracking_configs(configdir, tracking_missing_frames, tracking_minim
         tracking = json.load(open(os.path.join(templatedir, 'tsk_tracking.json')))
         tracking['min_frame_number'] = tracking_minimum_frames
         tracking['min_speed'] = target_minimum_speed
+        tracking['max_speed'] = target_maximum_speed
         tracking['kalman']['max_missing_frames'] = tracking_missing_frames
         tracking['kalman']['search_radius'] = target_maximum_speed
         with open(os.path.join(configdir, 'tsk_tracking.json'), 'w') as f:
@@ -176,7 +177,7 @@ class GlobalOffsetList:
                 f.write('{0} {1}\n'.format(offset[0], offset[1]))
 
 class KalmanTracker:
-    def __init__(self, frame_start: int, ptid: int, pt: np.ndarray, params: dict):
+    def __init__(self, frame_start: int, ptid: int, pt: np.ndarray, offset, params: dict):
         # State vector: [x, y, vx, vy] - position (x,y) and velocity (vx,vy)
         self.state_size = 4
         # Measurement vector: [x, y] - we can only observe position
@@ -213,6 +214,7 @@ class KalmanTracker:
         self._search_radius = params['search_radius']
         self._response_dieout_ratio = params['response_dieout_ratio']
         self._response = 0
+        self._location = { 0 : np.array(pt[:2])+offset}
     
     @property
     def good(self) -> bool:
@@ -287,10 +289,10 @@ class KalmanTracker:
         if len(xy) > 2*max(xlen, ylen)/min_speed:
             return False
 
-        v = np.gradient(xy, spacing, axis=0)
-        vn = np.linalg.norm(v, axis=1)
-        if np.count_nonzero(vn < min_speed) > 0.3 * len(vn):
-            return False
+        # v = np.gradient(xy, spacing, axis=0)
+        # vn = np.linalg.norm(v, axis=1)
+        # if np.count_nonzero(vn < min_speed) > 0.3 * len(vn):
+        #     return False
 
         self._curvature = self.curvature(curvature)
         
@@ -341,9 +343,23 @@ def pointwise_tracking(seeds : list, trackers : list, frameid: int, params : dic
     # Add new trackers for unused seeds
     for i, used in enumerate(occupied):
         if not used:
-            trackers.append(KalmanTracker(frameid, i, seeds[i], params))
+            trackers.append(KalmanTracker(frameid, i, seeds[i], (0,0), params))
 
     return trackers
+
+def save_detection(file: str, all: List[List[dict]]):
+    try:
+        with open(file, 'w') as f:
+            f.write('{}\n'.format(len(all)))
+            for points in all:
+                f.write('{}\n'.format(len(points)))
+                for p in points:
+                    f.write(f'{p["centroid"][0]:.1f}\t{p["centroid"][1]:.1f}\t')
+                    f.write(f'{p["intensity"]:.1f}\t{p["eccentricity"]:.2f}\t')
+                    f.write(f'{p["area"]:.1f}\t{p["confidence"]:.2f}\t')
+                    f.write(f'{p["bbox"][0]}\t{p["bbox"][1]}\t{p["bbox"][2]}\t{p["bbox"][3]}\n')
+    except Exception as e:
+        print(f"[ERROR]: {e}")
 
 def load_detection(file: str):
     all = []
@@ -356,7 +372,18 @@ def load_detection(file: str):
             for j in range(layers):
                 cnt = int(lines[i].strip())
                 i += 1
-                points = [[float(x) for x in line.strip().split()] for line in lines[i:i+cnt]]
+                points = []
+                for line in lines[i:i+cnt]:
+                    items = line.strip().split()
+                    point = {
+                        'centroid': [float(items[0]), float(items[1])],
+                        'intensity': float(items[2]),
+                        'eccentricity': float(items[3]),
+                        'area': float(items[4]),
+                        'confidence': float(items[5]),
+                        'bbox': [int(items[6]), int(items[7]), int(items[8]), int(items[9])]
+                    }
+                    points.append(point) #list(map(float, items[0:4]))
                 i += cnt
                 all.append(points)
                     

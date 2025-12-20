@@ -17,7 +17,10 @@ plt.rcParams['axes.formatter.use_mathtext'] = False
 
 from hsp.modules.config import orderjson_to_config
 from hsp.utils.filewatcher import TimeoutFileWatcher
-from hsp.utils import parallel, common
+from hsp.utils import parallel, common, restoration
+from hsp.utils.background import BackgroundSubtractor
+from hsp.utils.detector import Detector
+from hsp.utils.tracker import TrackingConfig, Tracker, Manager
 from hsp.modules import object_tracking, geometric_locating, trajectory_prediction
 
 from trajectory_evaluate import FJ_target, DD_target, map_values, read_json
@@ -146,28 +149,27 @@ def anomaly_detection( output_prefix, image, background, config):
 
     object_tracking.detect_anomaly( image, os.path.dirname(output_prefix), background, output_prefix, config['debug'])
 
-def anomaly_tracking( frameid : int, trackers : list,  seedfiles : list, offsets : object_tracking.GlobalOffsetList, params : dict, load_file):
-    trackers_finished = []
+def denoising(srcname, dstname, input_dir, output_dir, config):
+    if not config['overwritten'] and os.path.exists(os.path.join(output_dir, dstname)):
+        return
+    data = common.rasterio_read(os.path.join(input_dir, srcname))
+    data = restoration.denoise(data, restoration.CONFIG_GAUSSIAN_BLUR)
+    common.rasterio_write(os.path.join(output_dir, dstname), data)
+
+def anomaly_tracking( frameid, trackers,  seedfiles, images_dir, params, load_file):
+    all_finished = []
     for i, file in enumerate(seedfiles):
         seeds = load_file(file)
-        trackers = object_tracking.pointwise_tracking(seeds[0], trackers, frameid+i, params['kalman'])
-        for tracker in trackers:
-            if not tracker.good :
-                tracker.remove_all_missings()
-                if tracker.is_valid(offsets, params['min_frame_number'], params['min_speed'], params['max_acceleration'], params.get('curvature','spline')):
-                    trackers_finished.append(tracker)
-        trackers = [tracker for tracker in trackers if tracker.good]
-    return trackers_finished, trackers
-
-def trajectory_file_refinement( trajectorydir, trajectoryname, framedir, config):
-    trajectoryfile = os.path.join(trajectorydir, trajectoryname)
-    hdrs, points = object_tracking.load_tracking(trajectoryfile)
-    trajectory, pca = object_tracking.refine_trajectory(points, framedir, config)
-    hdrs += pca
-    with open(trajectoryfile, 'w') as f:
-        f.write('\t'.join(str(x) for x in hdrs)+'\n')
-        for pt in trajectory:
-            f.write('{}\n'.format('\t'.join(f"{x:.2f}" if isinstance(x,float) else str(x) for x in pt)))
+        name = os.path.basename(file).replace('_points.txt','')
+        frame = common.rasterio_read(os.path.join(images_dir, name))
+        trackers.process(seeds[0], frame)
+        new_tracks, finished_tracks = trackers.check()
+        if len(new_tracks) > 0:
+            print('当前帧数：', frameid+i)
+            for i, track in enumerate(new_tracks):
+                print(f'发现新目标{i}： 起始帧数为{track.start_frame}')
+        all_finished.extend(finished_tracks)
+    return all_finished
 
 def export_trajectories_as_sheets(output, trajectory_files, time_to_framename, cfg):
     dataframes = {}
@@ -210,7 +212,7 @@ def export_trajectories_as_sheets(output, trajectory_files, time_to_framename, c
         except:
             dir = os.path.dirname(output)
             for name, df in dataframes.items():
-                df.to_csv(os.path.join(dir, name+'.csv'))
+                df.to_csv(os.path.join(dir, name+'.csv'), encoding='utf-8-sig')
 
     return summary
 
@@ -301,7 +303,7 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         if type:
             height_range = 2*locating.height_scale()
             acceleration = min(2.5*9.8, 2*height_range/(cnt**2)) 
-            z0 = locating.height_off()-locating.height_scale()
+            z0 = max(0,locating.height_off()-locating.height_scale())
         else:
             acceleration = 0.0
             z0 = locating.height_off()
@@ -354,9 +356,9 @@ def trajectory_locating( output, trajectory, type, framedir, frametime, config):
         proj_filtered = geometric_locating.filter_2d_points(proj, window_size=min(31,len(proj)))
         v = np.gradient(proj_filtered, axis=0)
         vn = np.linalg.norm(v, axis=1)
-        validv = np.count_nonzero(vn < 200)
+        validv = np.count_nonzero(vn < 90)
 
-        header_info['Category']['Confidence'] = min((hdrs[3])/3*0.25, 0.5)+min(validv/len(vn)/0.8*0.5, 0.5)
+        header_info['Category']['Confidence'] = min((hdrs[3])/3*0.1, 0.2)+min(validv/len(vn)/0.8*0.8, 0.8)
 
 
         with open(output, 'w') as fout: 
@@ -556,6 +558,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
         file_watcher.start(dir_input)
 
         progress = 0
+        inputs = []
         bg_batches = []
         bg_idx_st = 0
         bg_idx_ed = 0
@@ -566,10 +569,19 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
         finished_trajectories = share['finished_trajectories']
         trajectory3d = share['3d_trajectories']
         num_trajectories = [0,0]
-        global_offsets = object_tracking.GlobalOffsetList()
         while file_watcher.is_alive() or progress < len(files):
             filecount = min(len(files), progress + batchsize)
             newfile_count = filecount-progress
+            if newfile_count > 0:
+                inputs.extend(files[progress:progress+newfile_count])
+                if cfg['preprocessing_denoising']:
+                    print('0a) denoising frames ...')
+                    batches = [(file, os.path.splitext(file)[0] + '.tif') for file in files[progress:progress+num]]
+                    parallel.launch_calls(denoising, [(os.path.join(dir_input, f), cfg['preprocessing_denoising']) for f in files[progress:filecount]], nb_workers, cfg, timeout=cfg['timeout'])
+                    
+                if cfg['preprocessing_camera_motion']:
+                    print('0b) estimating camera motion ...')
+                
             if bg_idx_ed+bg_batchsize < filecount:
                 bg_batch = (filecount-bg_idx_ed) // bg_batchsize
                 bg_batches_new = []
@@ -727,53 +739,71 @@ def detection_processing(cfg, event, logger, share):
 
     print(f'2) detecting anomaly objects from #{len(files)} frames ...')
     logger.set_step(1) 
-    logger.set_total(len(files)) 
-    bg_batches = []
-    output_prefix = []
+    total_steps = len(files)+int(cfg['preprocessing_denoising'])*len(files)+int(cfg['preprocessing_camera_motion'])*len(files)
+    logger.set_total(total_steps) 
+    progress0 = 0
 
-    # def batch_process(i, sz):
-    #     if sz == batchsize:
-    #         ed = i+sz
-    #         bg_batches = []
-    #         bg_batches.append(
-    #             (os.path.join(dir_detection, f'bg_{i}_{ed-1}.tif'), directory, files[i:ed] ))
-    #         print('2a) extracting background ...')
-    #         parallel.launch_calls(background_extraction, bg_batches, nb_workers, cfg, timeout=cfg['timeout'])
+    if cfg['preprocessing_denoising']:
+        print('0a) denoising frames ...')
+        progress = 0
+        outputs = []
+        while progress < len(files):
+            num = min(batchsize, len(files)-progress)
+            batches = [(file, os.path.splitext(file)[0] + '.tif') for file in files[progress:progress+num]]
+            parallel.launch_calls(denoising, batches, nb_workers, directory, dir_detection, cfg, timeout=cfg['timeout'])
 
-    #     anomaly_batches = [(os.path.join(dir_detection, os.path.basename(file)), os.path.join(
-    #             directory, file), bg_batches[0][0]) for file in files[frame_st:frame_ed]]
-    #     print('2b) detecting anomaly objects ...')
-    #     parallel.launch_calls(anomaly_detection, anomaly_batches, nb_workers, cfg, timeout=cfg['timeout'])
+            outputs += [x[1] for x in batches]
 
-    #     output_prefix += [x[0] for x in anomaly_batches]
+            progress += num
+            logger.progress_update(progress)
 
-    # success, msg = while_loop_with_events(batch_process, len(files), batchsize, event, logger)
+            if event.is_terminated():
+                return True, "用户终止"
 
-    # if not success:
-    #     return success, msg
+            while event.is_paused():
+                time.sleep(0.5)
+                if event.is_terminated():
+                    return True, "用户终止"
 
+                    
+        directory = dir_detection
+        files = outputs
+        progress0 += len(files)
+
+    if cfg['preprocessing_camera_motion']:
+        print('0b) correcting camera motion ...')
+        progress = 0
+        outputs = []
+        batches = []
+        while progress < len(files):
+            num = min(batchsize, len(files)-progress)
+            batches = [(file, os.path.splitext(file)[0] + '.tif') for file in files[progress:progress+num]]
+
+    filecount = len(files)
     progress = 0
-    while progress < len(files):
-        frame_st = progress
-        if frame_st+batchsize <= len(files):
-            frame_ed = frame_st+batchsize
-            bg_batches = []
-            bg_batches.append(
-                (os.path.join(dir_detection, f'bg_{frame_st}_{frame_ed-1}.tif'), directory, files[frame_st:frame_ed] ))
-            print('2a) extracting background ...')
-            parallel.launch_calls(background_extraction, bg_batches, nb_workers, cfg, timeout=cfg['timeout'])
-        else:
-            frame_ed = len(files)
+    os.makedirs(os.path.join(dir_detection, 'fg'), exist_ok=True)
+    os.makedirs(os.path.join(dir_detection, 'mask'), exist_ok=True)
+    print('2a) detecting anomaly objects ...')
+    outputs = []
+    while progress < filecount:
+        num = batchsize
+        if filecount - progress < 2*batchsize:
+            num = filecount - progress
 
-        anomaly_batches = [(os.path.join(dir_detection, os.path.basename(file)), os.path.join(
-                directory, file), bg_batches[0][0]) for file in files[frame_st:frame_ed]]
-        print('2b) detecting anomaly objects ...')
-        parallel.launch_calls(anomaly_detection, anomaly_batches, nb_workers, cfg, timeout=cfg['timeout'])
+        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'])
+        frames = [common.rasterio_read(os.path.join(directory, file)) for file in files[progress:progress+num]]
+        for name, frame in zip(files[progress:progress+num], frames):
+            mask, bg = bg_subtractor.process(frame) 
+            fg = frame.astype(np.int16) - bg.astype(np.int16)
+            common.rasterio_write(os.path.join(dir_detection, 'fg', os.path.basename(name)), fg)
+            common.rasterio_write(os.path.join(dir_detection, 'mask', os.path.basename(name)), mask)
+            objects = Detector().process(fg, mask, cfg['detection_max_area'], cfg['detection_min_area'])
+            outputfile = os.path.join(dir_detection, os.path.basename(name)+cfg['detection_output_postfix'][0])
+            object_tracking.save_detection(outputfile, [objects])
+            outputs.append(outputfile)
 
-        output_prefix += [os.path.basename(x[0]) for x in anomaly_batches]
-
-        progress = frame_ed
-        logger.progress_update(progress)
+        progress += num
+        logger.progress_update(progress0+progress)
 
         if event.is_terminated():
             return True, "用户终止"
@@ -787,14 +817,14 @@ def detection_processing(cfg, event, logger, share):
     logger.set_step(2) 
     logger.set_total(2) 
 
-    summary_files = [os.path.join(cfg['output_dir'], 'detection_point_list.txt'), os.path.join(cfg['output_dir'], 'detection_line_list.txt')]
+    summary_files = [os.path.join(cfg['output_dir'], 'detection_point_list.txt')]
     for summary,postfix in zip( summary_files, cfg['detection_output_postfix']):
         with open(summary, 'w') as f:
-            for prefix in output_prefix:
-                f.write('{}\n'.format(prefix+postfix))
+            for output in outputs:
+                f.write('{}\n'.format(output))
 
     common.print_elapsed_time(True)
-    return True, {'points':summary_files[0], 'lines':summary_files[1]}
+    return True, {'points':summary_files[0], 'lines': '' }
 
 def tracking_processing(cfg, event, logger, share):
 
@@ -821,7 +851,7 @@ def tracking_processing(cfg, event, logger, share):
     if tracking_params is None :
         return False, "生成配置文件失败"
 
-    summary_files = [os.path.join(cfg['output_dir'], 'detection_point_list.txt'), os.path.join(cfg['output_dir'], 'detection_line_list.txt')]
+    summary_files = [os.path.join(cfg['output_dir'], 'detection_point_list.txt')]
 
     for i,file in enumerate(summary_files):
         try:
@@ -833,7 +863,6 @@ def tracking_processing(cfg, event, logger, share):
             print(f"[ERROR]: detection file list {file}: {e}!")
             return False, "目标检测文件列表载入失败"
 
-    assert(len(summary_files[0]) == len(summary_files[1]))
     filecount = len(summary_files[0])
     print(f'1) checking detection results: #{filecount} point files and line files ...')
     for i, files in enumerate(summary_files):
@@ -855,21 +884,22 @@ def tracking_processing(cfg, event, logger, share):
 
     frames = [os.path.basename(x)[:-len(cfg['detection_output_postfix'][0])] for x in summary_files[0]]
 
-    global_offsets = object_tracking.GlobalOffsetList()
     progress = 0
+    tracking_config = TrackingConfig(min_track_length=cfg['tracking_minimum_frames'],
+                                     max_missing_frames=cfg['tracking_missing_frames'],
+                                     min_velocity=cfg['target_minimum_speed'],
+                                     max_velocity=cfg['target_maximum_speed'])
+    trackers = Manager(0, tracking_config)
     while progress < filecount:
         num = min(batchsize, filecount-progress)
 
-        for seedfile in summary_files[0][progress:progress+num]:
-            seeds = object_tracking.load_detection(seedfile)[0]
-            global_offsets.append(seeds)
-
         for i, postfix in enumerate(cfg['tracking_output_postfix']):
             seedfiles = summary_files[i][progress:progress+num]
-            finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, global_offsets, tracking_params, object_tracking.load_detection)
+            finished = anomaly_tracking(progress, trackers, seedfiles, os.path.join(dir_detection, 'fg'), tracking_params, object_tracking.load_detection)
             for tracker in finished:
                 name = 'M{}{}'.format(len(finished_trajectories[i])+1, postfix)
-                finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, frames))
+                tracker.save(os.path.join(dir_tracking, name), frames)
+                finished_trajectories[i].append([tracker.start_frame, len(tracker.history), 0, name])
         
         progress += num
         logger.progress_update(progress)
@@ -882,49 +912,21 @@ def tracking_processing(cfg, event, logger, share):
             if event.is_terminated():
                 return True, "用户终止"
 
-    for i, trajectories in enumerate(trackers):
-        if len(trajectories) == 0:
-            continue
-        for tracker in trajectories:
-            tracker.remove_all_missings()
-            if tracker.is_valid(global_offsets, tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
-                name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
-                finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, frames))
-        trackers[i].clear()
-
-    global_offsets.save(os.path.join(dir_tracking, 'global_offsets.txt'))
+    finished = trackers.terminate()
+    for tracker in finished:
+        name = 'M{}{}'.format(len(finished_trajectories[0])+1, cfg['tracking_output_postfix'][0])
+        tracker.save(os.path.join(dir_tracking, name), frames)
+        finished_trajectories[0].append([tracker.start_frame, len(tracker.history), 0, name])
     
     print('3) collecting tracking results ...')
-    trajectories = [item for sublist in finished_trajectories for item in sublist]
-    progress = 0
-    filecount = len(trajectories)
-    logger.set_step(2)
-    logger.set_total(filecount)
-
-    while progress < filecount:
-        num = min(batchsize, filecount-progress)
-
-        batches = [(dir_tracking, info[-1], dir_input) for info in trajectories[progress:progress+num]]
-        parallel.launch_calls(trajectory_file_refinement, batches, nb_workers, cfg, timeout=cfg['timeout'])
-
-        progress += num
-
-        if event.is_terminated():
-            return True, "用户终止"
-
-        while event.is_paused():
-            time.sleep(0.5)
-            if event.is_terminated(): 
-                return True, "用户终止"
-
-    summary_files = [os.path.join(cfg['output_dir'], 'tracking_point_list.csv'), os.path.join(cfg['output_dir'], 'tracking_line_list.csv')]
+    summary_files = [os.path.join(cfg['output_dir'], 'tracking_point_list.csv')]
     for summary, trajectories in zip( summary_files, finished_trajectories):
         with open(summary, 'w') as f:
             for trajectory in trajectories:
                 f.write('{}\n'.format(','.join(f"{x:.2f}" if isinstance(x,float) else str(x) for x in trajectory)))
 
     common.print_elapsed_time(True)
-    return True, {'points':summary_files[0], 'lines':summary_files[1]}
+    return True, {'points':summary_files[0]}
 
 def geolocating_processing(cfg, event, logger, share):
 

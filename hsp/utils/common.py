@@ -267,7 +267,7 @@ def normalize(image : np.ndarray, src_range : Iterable, dst_range : Iterable = (
     scale = (dst_range[1]-dst_range[0])/(src_range[1]-src_range[0])
     return np.clip((image.astype(np.float32) - src_range[0])*scale + dst_range[0], dst_range[0], dst_range[1])
 
-def rasterio_read_as_gray(path, window=None, out_shape = None):
+def rasterio_read(path, window=None, out_shape = None):
     with rasterio.open(path, 'r') as src:
         img = src.read(1, window=rasterio.windows.Window(*window) if window is not None else None, out_shape = out_shape)
         return img

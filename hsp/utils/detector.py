@@ -1,10 +1,13 @@
+from matplotlib import image
 import numpy as np
 from scipy.linalg import inv
-from background import remove_background
+from hsp.utils.background import remove_background
 import sys
 import os
 from osgeo import gdal
 import cv2 as cv
+from skimage.feature import blob_dog, blob_log, blob_doh
+from sklearn.cluster import DBSCAN
 
 def global_rx_detector(image, background_mask=None):
     """
@@ -154,6 +157,105 @@ def visualize_results(original, detection, title="RX Anomaly Detection", output=
         plt.savefig(output, dpi=dpi, bbox_inches='tight')
         plt.close()
         print(f"Results saved to {output}")
+
+def blob_detection(image, method = 'dog', min_sigma = 1, max_sigma = 3, num_sigma = 10, threshold = 0.01):
+    """
+    Detect blobs in the image using specified method
+    
+    Parameters:
+    image -- Input 2D image (H x W)
+    method -- Blob detection method: 'dog', 'log', or 'doh' (default: 'dog')
+    max_sigma -- Maximum standard deviation for Gaussian kernel (default: 10)
+    num_sigma -- Number of intermediate values of standard deviations (default: 5)
+    threshold -- Threshold for blob detection (default: 0.1)
+    
+    Returns:
+    blobs -- Detected blobs as an array of shape (n_blobs, 3) with each row as (y, x, radius)
+    """
+    if method == 'dog':
+        blobs = blob_dog(image, min_sigma= min_sigma, max_sigma=max_sigma, threshold=threshold)
+        blobs[:, 2] = blobs[:, 2] * np.sqrt(2)  # Convert to radius
+    elif method == 'log':
+        blobs = blob_log(image, min_sigma= min_sigma, max_sigma=max_sigma, threshold=threshold, num_sigma=num_sigma)
+        blobs[:, 2] = blobs[:, 2] * np.sqrt(2)  # Convert to radius
+    elif method == 'doh':
+        blobs = blob_doh(image, min_sigma= min_sigma, max_sigma=max_sigma, threshold=threshold)
+    else:
+        raise ValueError("Unknown method. Choose from 'dog', 'log', or 'doh'.")
+    
+    return blobs
+
+import cv2
+from skimage import filters, segmentation, measure
+class Detector:
+    def __init__(self) -> None:
+        pass
+
+    def process(self, image, mask, max_region_area = 100, min_region_area = 1, check_shadow_radius = 0, min_region_intensity = 0):
+        if mask is not None:
+            labels = measure.label(mask)
+        else:
+            thresh = filters.threshold_niblack(image, window_size=11, k=-2)
+            mask = image > thresh
+            markers = measure.label(mask, background=False)
+
+            # image = exposure.equalize_adapthist(
+            #     image,
+            #     clip_limit=0.03
+            # )
+
+            # mask = morphology.remove_small_holes(mask.astype(bool), area_threshold=64)
+            # contours, _ = cv.findContours(
+            #     mask,
+            #     cv.RETR_EXTERNAL,
+            #     cv.CHAIN_APPROX_SIMPLE
+            # )
+            # markers = np.zeros_like(image, dtype=np.int32)
+            # for idx, contour in enumerate(contours):
+            #     if cv2.contourArea(contour) > max_region_area:
+            #         continue
+            #     cv2.drawContours(markers, [contour], -1, idx + 1, -1)
+
+        
+            # gradient_sobel = filters.sobel(image)
+            # gradient_prewitt = filters.prewitt(image)
+            # gradient = np.maximum(gradient_sobel, gradient_prewitt * 1.5)
+
+            gradient = filters.sobel(image)
+
+            labels = segmentation.watershed(
+                gradient,
+                markers=markers,
+                connectivity=2, 
+                watershed_line= False 
+            )
+
+        image[image < 0] = 0
+        regions = measure.regionprops(labels, intensity_image=image)
+
+        objects = []
+        for idx, region in enumerate(regions):
+            # roi = image[region.bbox[0]:region.bbox[2], region.bbox[1]:region.bbox[3]]
+            # min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(roi)
+            if min_region_area < region.area < max_region_area and region.max_intensity > min_region_intensity:
+                if check_shadow_radius > 0:
+                    if region.bbox[0]-check_shadow_radius > 0 and region.bbox[1]-check_shadow_radius > 0 and \
+                       region.bbox[2]+check_shadow_radius < image.shape[0] and region.bbox[3]+check_shadow_radius < image.shape[1]:
+                        win = image[ region.bbox[0]-check_shadow_radius:region.bbox[2]+check_shadow_radius, region.bbox[1]-check_shadow_radius:region.bbox[3]+check_shadow_radius ]
+                        minv = np.min(win)
+                        maxv = np.max(win)
+                        if minv > 0 or minv < -maxv:
+                            continue
+                seed_info = {
+                        'centroid': (float(region.centroid[1]), float(region.centroid[0])),#(float(region.bbox[1]+max_loc[0]), float(region.bbox[0]+max_loc[1])),
+                        'bbox': (int(region.bbox[1]), int(region.bbox[0]), int(region.bbox[3]-region.bbox[1]), int(region.bbox[2]-region.bbox[0])),
+                        'area': float(region.area),
+                        'eccentricity': region.eccentricity,
+                        'intensity': float(region.max_intensity),
+                        'confidence': min(1.0, region.area / 9)
+                    }
+                objects.append(seed_info)
+        return objects
 
 def test():
     # Simulate hyperspectral data (100x100x10)
