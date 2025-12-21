@@ -237,7 +237,7 @@ class Detector:
         for idx, region in enumerate(regions):
             # roi = image[region.bbox[0]:region.bbox[2], region.bbox[1]:region.bbox[3]]
             # min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(roi)
-            if min_region_area < region.area < max_region_area and region.max_intensity > min_region_intensity:
+            if min_region_area <= region.area <= max_region_area and region.max_intensity > min_region_intensity:
                 if check_shadow_radius > 0:
                     if region.bbox[0]-check_shadow_radius > 0 and region.bbox[1]-check_shadow_radius > 0 and \
                        region.bbox[2]+check_shadow_radius < image.shape[0] and region.bbox[3]+check_shadow_radius < image.shape[1]:

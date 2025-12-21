@@ -22,7 +22,7 @@ DEFAULT_CFG = {
     'detection_minimum_size_linewise': 4,
     'detection_maximum_size_linewise': 10,
     'detection_min_area': 2,
-    'detection_max_area': 25,
+    'detection_max_area': 15,
 
     'tracking_missing_frames': 10,
     'tracking_minimum_frames': 10,
