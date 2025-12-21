@@ -47,6 +47,18 @@ if __name__ == "__main__":
     cfg = workflow.read_order_file(os.path.join(os.path.dirname( dirpath), "template/Order.json"))
     workflow.detection_processing( cfg, service.Event(), service.Logger(), share)
     workflow.tracking_processing( cfg, service.Event(), service.Logger(), share)
+    # exit(0)
+
+    videodir = os.path.join(cfg['temporary_dir'], 'video')
+    os.makedirs(videodir, exist_ok=True)
+    traj_sum_file = os.path.join(cfg['output_dir'], 'tracking_point_list.csv')
+    with open(traj_sum_file, 'r') as f:
+        trajs = [os.path.join( cfg['temporary_dir'], 'tracking', item.rstrip().split(',')[-1]) for item in f.readlines()]
+
+    for traj in trajs:
+        workflow.trajectory_video(
+            os.path.join(videodir, os.path.splitext(os.path.basename(traj))[0] + '.mp4'), traj, cfg['input_dir'])
+
 
     exit(0)
 

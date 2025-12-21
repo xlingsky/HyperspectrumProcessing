@@ -790,8 +790,9 @@ def detection_processing(cfg, event, logger, share):
         if filecount - progress < 2*batchsize:
             num = filecount - progress
 
-        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'])
+        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'], var_threshold=1000)
         frames = [common.rasterio_read(os.path.join(directory, file)) for file in files[progress:progress+num]]
+        bg_subtractor.warmup(frames)
         for name, frame in zip(files[progress:progress+num], frames):
             mask, bg = bg_subtractor.process(frame) 
             fg = frame.astype(np.int16) - bg.astype(np.int16)
@@ -1163,7 +1164,7 @@ def trajectory_video( output:str, trajectory: str, framedir : str, clip = True, 
     frames = []
     src_range = None
     for info in trajectory:
-        image = common.rasterio_read_as_gray(os.path.join(framedir, info[0]), win)
+        image = common.rasterio_read(os.path.join(framedir, info[0]), win)
         if src_range is None:
             src_range = common.get_minmax(image, (2, 98))
         image = common.normalize(image, src_range, (0, 255)).astype(np.uint8)

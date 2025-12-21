@@ -195,7 +195,7 @@ class Detector:
         if mask is not None:
             labels = measure.label(mask)
         else:
-            thresh = filters.threshold_niblack(image, window_size=11, k=-2)
+            thresh = filters.threshold_niblack(image, window_size=11, k=-3)
             mask = image > thresh
             markers = measure.label(mask, background=False)
 

@@ -19,8 +19,8 @@ class TrackingConfig:
     template_extending_size: int = 5
     search_margin: int = 25
     correlation_threshold: float = 0.8
-    seed_correlation_threshold: float = 0.1
-    distance_to_merge: int = 5
+    seed_correlation_threshold: float = 0.6
+    distance_to_merge: int = 2
     
     # Tracking management
     seed_confidence_threshold: float = 0.1
@@ -39,7 +39,7 @@ class TrackingConfig:
 class KalmanConfig:
     """Configuration for OpenCV Kalman Filter"""
     # Motion model type
-    motion_model: str = 'constant_acceleration'  # 'constant_velocity', 'constant_acceleration'
+    motion_model: str = 'constant_velocity'  # 'constant_velocity', 'constant_acceleration'
     
     # Noise parameters (higher values = more uncertainty)
     process_noise_pos: float = 1e-3      # Process noise for position
@@ -422,9 +422,10 @@ class Tracker:
         self.seed_id = self.seed_id[:num_frames-self.missing_frames]
         self.seed_history = self.seed_history[:num_frames-self.missing_frames]
         self.innovation_history = self.innovation_history[:num_frames-self.missing_frames]
+        self.missing_frames = 0
 
     def valid_frame_number(self) -> int:
-        return np.count_nonzero(np.array(self.seed_id) >= -1)
+        return np.count_nonzero(np.array(self.seed_id) >= 0)
 
     def save(self, filepath:str, frames:list[str]):
         try:
@@ -620,7 +621,7 @@ class Manager:
                         'confidence': best_match_confidence
                     }
                 elif match_result['confidence'] > self.config.correlation_threshold:
-                    last_seed = track.seed_history[-1]['seed']
+                    last_seed = track.seed_history[-1]['seed'].copy()
                     last_seed['centroid'] = match_result['position']
                     associations[track_id] = {
                         'id': -1,
@@ -646,25 +647,27 @@ class Manager:
             filtered_seeds, self.tracks, frame, camera_motion
         )
 
-        # seed_to_tracks = {}
-        # for track_id, association in associations.items():
-        #     if track_id == -1:
-        #         continue
-        #     if association['id'] in seed_to_tracks:
-        #         seed_to_tracks[association['id']].append(track_id)
-        #     else:
-        #         seed_to_tracks[association['id']] = [track_id]
+        seed_to_tracks = {}
+        for track_id, association in associations.items():
+            if association['id'] == -1:
+                continue
+            if association['id'] in seed_to_tracks:
+                seed_to_tracks[association['id']].append(track_id)
+            else:
+                seed_to_tracks[association['id']] = [track_id]
 
-        # for _, track_ids in seed_to_tracks.items():
-        #     best_id, best_confidence = -1, 0.0
-        #     for track_id in track_ids:
-        #         confidence = associations[track_id]['confidence'] + len(self.tracks[track_id].history)/self.config.min_track_length
-        #         if  confidence > best_confidence:
-        #             best_id = track_id
-        #             best_confidence = associations[track_id]['confidence']
-        #     for track_id in track_ids:
-        #         if track_id != best_id:
-        #             associations.pop(track_id)
+        for _, track_ids in seed_to_tracks.items():
+            if len(track_ids) < 2:
+                continue
+            best_id, best_confidence = -1, 0.0
+            for track_id in track_ids:
+                confidence = associations[track_id]['confidence'] + len(self.tracks[track_id].history)/self.config.min_track_length
+                if  confidence > best_confidence:
+                    best_id = track_id
+                    best_confidence = confidence
+            for track_id in track_ids:
+                if track_id != best_id:
+                    associations.pop(track_id)
 
         missing_tracks = [True] * len(self.tracks)
         for track_id, association in associations.items():
@@ -680,8 +683,12 @@ class Manager:
         for track_id, track in enumerate(self.tracks):
             if missing_tracks[track_id]:
                 predicted_pos = track.last_prediction
-                info = track.seed_history[-1].copy()
-                info['id'] = -2
+                info = {
+                    'id': -2,
+                    'seed': track.seed_history[-1]['seed'].copy(),
+                    'distance': 0,
+                    'confidence': 0
+                }
                 info['seed']['centroid'] = (predicted_pos[0]-camera_motion[0], predicted_pos[1]-camera_motion[1])
                 track.update( (predicted_pos[0], predicted_pos[1]), -2, info=info, template=None)
 
@@ -703,9 +710,9 @@ class Manager:
             speed = np.linalg.norm(np.array(track.history[-1]) - np.array(track.history[0])) / (len(track.history)-1)
             if speed < self.config.min_velocity or speed > self.config.max_velocity:
                 return 0.0
-        metrics = track.get_performance_metrics()
-        if len(metrics)>0 and metrics['max_innovation'] > self.config.max_innovation:
-            return 0.0
+        # metrics = track.get_performance_metrics()
+        # if len(metrics)>0 and metrics['max_innovation'] > self.config.max_innovation:
+        #     return 0.0
         return track.valid_frame_number() / self.config.min_track_length
 
     def check(self) -> Tuple[List[Tracker], List[Tracker]]:
