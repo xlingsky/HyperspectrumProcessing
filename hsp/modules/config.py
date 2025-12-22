@@ -21,7 +21,8 @@ DEFAULT_CFG = {
     'detection_minimum_size_pointwise': 1,
     'detection_minimum_size_linewise': 4,
     'detection_maximum_size_linewise': 10,
-    'detection_min_area': 2,
+    'detection_var_threshold': 1000,
+    'detection_min_area': 1,
     'detection_max_area': 15,
 
     'tracking_missing_frames': 10,
@@ -94,6 +95,7 @@ def orderjson_to_config(orderxml):
                 cfg['target_maximum_size'] = float(params['TargetMaximumSize'])/400
                 cfg['target_minimum_speed'] = float(params['MinSpeed'])/400
                 cfg['target_maximum_speed'] = float(params['MaxSpeed'])/400
+                cfg['detection_var_threshold'] = float(params["SearchRange"])
             except Exception as e:
                 print(f"[WARNING]: {e}")
 

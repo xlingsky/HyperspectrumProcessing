@@ -9,9 +9,9 @@
 "SatelliteID":"GF7"},
 "FileBody":
 {
-"InputFile":"/Volumes/LittleOne/data/class1_discover_time/1/di1", 
-"LocalWorkDir":"/Volumes/LittleOne/data/class1_discover_time/1//ws/temp",
-    "WorkDir":"/Volumes/LittleOne/data/class1_discover_time/1//ws/results",
+"InputFile":"/Volumes/LittleOne/data/class1_discover_time/2/di1", 
+"LocalWorkDir":"/Volumes/LittleOne/data/class1_discover_time/2/ws/temp",
+    "WorkDir":"/Volumes/LittleOne/data/class1_discover_time/2/ws/results",
 "OperatorName":"sys",
 "Priority":"0",
 "UserType":"sys",
@@ -27,7 +27,7 @@
 "MinSpeed":"120",
 "MinAltitude":"",
 "MaxAltitude":"",
-"SearchRange":"",
+"SearchRange":"400",
 "TraFusionIntel":"",
 "FeatureLibrary":"",
 "TargetRecogIntel":""

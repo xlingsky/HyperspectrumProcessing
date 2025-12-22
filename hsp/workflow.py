@@ -529,6 +529,7 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
         print('1) tracking objects in frames ...')
         dir_detection = os.path.join(wsdir, object_tracking.DETECTION_DIRNAME)
         os.makedirs(dir_detection, exist_ok=True)
+        os.makedirs(os.path.join(dir_detection, 'fg'), exist_ok=True)
         dir_tracking = os.path.join(wsdir, object_tracking.TRACKING_DIRNAME)
         os.makedirs(dir_tracking, exist_ok=True)
         dir_geoloc = os.path.join(wsdir, geometric_locating.GEOLOCATION_DIRNAME)
@@ -558,95 +559,82 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
         file_watcher.start(dir_input)
 
         progress = 0
+        loading_progress = 0
+        num_trajectories = 0
         inputs = []
-        bg_batches = []
-        bg_idx_st = 0
-        bg_idx_ed = 0
-        share['ongoing_trajectories'] = [list(),list()]
-        share['finished_trajectories'] = [list(),list()]
-        share['3d_trajectories'] = []
-        trackers = share['ongoing_trajectories']
+        share['finished_trajectories'] = list()
         finished_trajectories = share['finished_trajectories']
-        trajectory3d = share['3d_trajectories']
-        num_trajectories = [0,0]
+        trajectory3d = []
+
+        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'], var_threshold=cfg.get('detection_var_threshold',1000))
+
+        tracking_config = TrackingConfig(min_track_length=cfg['tracking_minimum_frames'],
+                                         max_missing_frames=cfg['tracking_missing_frames'],
+                                         min_velocity=cfg['target_minimum_speed'],
+                                         max_velocity=cfg['target_maximum_speed'])
+        trackers = Manager(0, tracking_config)
+
         while file_watcher.is_alive() or progress < len(files):
             filecount = min(len(files), progress + batchsize)
-            newfile_count = filecount-progress
-            if newfile_count > 0:
-                inputs.extend(files[progress:progress+newfile_count])
+            loading_count = filecount-loading_progress
+            
+            if loading_count > 0:
+                newframes = [common.rasterio_read(os.path.join(dir_input, file)) for file in files[loading_progress:loading_progress+loading_count]]
                 if cfg['preprocessing_denoising']:
                     print('0a) denoising frames ...')
-                    batches = [(file, os.path.splitext(file)[0] + '.tif') for file in files[progress:progress+num]]
-                    parallel.launch_calls(denoising, [(os.path.join(dir_input, f), cfg['preprocessing_denoising']) for f in files[progress:filecount]], nb_workers, cfg, timeout=cfg['timeout'])
+                    # batches = [(file, os.path.splitext(file)[0] + '.tif') for file in newframes]
+                    # parallel.launch_calls(denoising, [(os.path.join(dir_input, f), cfg['preprocessing_denoising']) for f in files[progress:filecount]], nb_workers, cfg, timeout=cfg['timeout'])
                     
                 if cfg['preprocessing_camera_motion']:
                     print('0b) estimating camera motion ...')
+                inputs.extend(newframes)
+                loading_progress += loading_count
                 
-            if bg_idx_ed+bg_batchsize < filecount:
-                bg_batch = (filecount-bg_idx_ed) // bg_batchsize
-                bg_batches_new = []
-                for i in range(bg_batch):
-                    st = bg_idx_ed+i*bg_batchsize
-                    bg_batches_new.append(
-                        (os.path.join(dir_detection, f'bg_{st}_{st+bg_batchsize-1}.tif'), dir_input, files[st:st+bg_batchsize] ))
-                print('1a) extracting background ...')
-                parallel.launch_calls(background_extraction, bg_batches_new, nb_workers, cfg, timeout=cfg['timeout'])
-                bg_batches += bg_batches_new
-                bg_idx_ed += bg_batchsize*bg_batch
-                i = min((progress-bg_idx_st) // bg_batchsize, len(bg_batches)-1)
-                bg_idx_st += i*bg_batchsize
-                bg_batches = bg_batches[i:]
+            if not bg_subtractor.is_initialized:
+                if len(inputs) >= cfg['background_frame_number']:
+                    bg_subtractor.warmup(inputs)
 
-            if len(bg_batches) > 0 and newfile_count > 0:
-                anomaly_batches = []
-                for i in range(newfile_count):
-                    file = files[progress+i]
-                    idx = min((progress+i-bg_idx_st)//bg_batchsize, len(bg_batches)-1)
-                    anomaly_batches.append((os.path.join(dir_detection, os.path.basename(file)), os.path.join(
-                        dir_input, file), bg_batches[idx][0]))
-                print('1b) detecting anomaly objects ...')
-                parallel.launch_calls(anomaly_detection, anomaly_batches, nb_workers, cfg, timeout=cfg['timeout'])
+            if bg_subtractor.is_initialized:
+                assert len(inputs) == filecount-progress
+                print('1a) detecting anomaly objects ...')
+                outputs = []
+                for name, frame in zip(files[progress:filecount], inputs):
+                    mask, bg = bg_subtractor.process(frame)
+                    fg = frame.astype(np.int16)-bg.astype(np.int16)
+                    common.rasterio_write(os.path.join(dir_detection, 'fg', os.path.basename(name)), fg)
 
-                print('1c) tracking anomaly objects ...')
-                for x in anomaly_batches:
-                    seedfile = x[0]+cfg['detection_output_postfix'][0]
-                    seeds = object_tracking.load_detection(seedfile)[0]
-                    global_offsets.append(seeds)
+                    objects = Detector().process(fg, mask, cfg['detection_max_area'], cfg['detection_min_area'])
+                    outputfile = os.path.join(dir_detection, os.path.basename(name)+cfg['detection_output_postfix'][0])
+                    object_tracking.save_detection(outputfile, [objects])
+                    outputs.append(outputfile)
 
-                for i, detection_postfix in enumerate(cfg['detection_output_postfix']):
-                    seedfiles = [x[0]+detection_postfix for x in anomaly_batches]
-                    finished, trackers[i] = anomaly_tracking(progress, trackers[i], seedfiles, global_offsets, tracking_params, object_tracking.load_detection)
+                print('1b) tracking anomaly objects ...')
+                inputs = outputs
+
+                finished = anomaly_tracking(progress, trackers, inputs, os.path.join(dir_detection, 'fg'), tracking_params, object_tracking.load_detection)
+                for tracker in finished:
+                    name = 'M{}{}'.format(len(finished_trajectories)+1, cfg['tracking_output_postfix'][0])
+                    tracker.save(os.path.join(dir_tracking, name), files)
+                    finished_trajectories.append([tracker.start_frame, len(tracker.history), 0, name])
+
+                if not file_watcher.is_alive() and progress+len(inputs) >= len(files):
+                    finished = trackers.terminate()
                     for tracker in finished:
-                        name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
-                        finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, files))
+                        name = 'M{}{}'.format(len(finished_trajectories)+1, cfg['tracking_output_postfix'][0])
+                        tracker.save(os.path.join(dir_tracking, name), files)
+                        finished_trajectories.append([tracker.start_frame, len(tracker.history), 0, name])
 
-                if not file_watcher.is_alive() and progress+newfile_count >= len(files):
-                    for i, trajectories in enumerate(trackers):
-                        if len(trajectories) == 0:
-                            continue
-                        for tracker in trajectories:
-                            tracker.remove_all_missings()
-                            if tracker.is_valid( global_offsets, tracking_params['min_frame_number'], tracking_params['min_speed'], tracking_params['max_acceleration'], tracking_params.get('curvature','spline')):
-                                name = 'M{}{}'.format(len(finished_trajectories[i])+1, cfg['tracking_output_postfix'][i])
-                                finished_trajectories[i].append(object_tracking.save_tracking(dir_tracking, name, tracker, files))
-                        trackers[i].clear()
+                new_trajectories = finished_trajectories[num_trajectories:]
 
-                new_trajectories = list()
-                for st, x in zip(num_trajectories, finished_trajectories):
-                    new_trajectories += x[st:]
-
-                print('\t#NEW Targets: {}/{}'.format(len(new_trajectories), num_trajectories[0]+num_trajectories[1]+len(new_trajectories)))
                 common.print_elapsed_time()
 
                 if len(new_trajectories) > 0:
 
-                    print('1d) refining trajectories ...')
-                    batches = [(dir_tracking, info[-1], dir_input) for info in new_trajectories]
-                    parallel.launch_calls(trajectory_file_refinement, batches, nb_workers, cfg, timeout=cfg['timeout'])
+                    print('\t#NEW Targets: {}/{}'.format(len(new_trajectories), len(finished_trajectories)))
 
-                    print('1f) geolocating trajectories ...')
-                    st = num_trajectories[0]+num_trajectories[1]+1
-                    batches = [( os.path.join(dir_output, f'M{st+i}.json' ), os.path.join( dir_tracking, trajectory[-1]), trajectory[-2] < 3 ) for i,trajectory in enumerate(new_trajectories) ]
+                    print('1d) geolocating trajectories ...')
+                    st = num_trajectories+1
+                    batches = [( os.path.join(dir_output, f'M{st+i}.json' ), os.path.join( dir_tracking, trajectory[-1]), False ) for i,trajectory in enumerate(new_trajectories) ]
                     parallel.launch_calls(trajectory_locating, batches, nb_workers, dir_input, {}, cfg, timeout=cfg['timeout'])
 
                     new_trajectory3d = [(batch[0],batch[-1]) for batch in batches if os.path.exists(batch[0])]
@@ -658,16 +646,17 @@ def automatic_processing(cfg, event, logger, share, start_from = 0):
                     new_trajectory3d = [ (batch[0],) if os.path.exists(batch[0]) else newt for batch, newt in zip(batches,new_trajectory3d) ]
                     trajectory3d += new_trajectory3d
 
-                    num_trajectories = [len(x) for x in finished_trajectories]
+                    num_trajectories = len(finished_trajectories)
 
                     for batch in new_trajectory3d:
                         logger.report(batch[0])
                 
                     common.print_elapsed_time()
 
-                progress += newfile_count
+                progress += len(inputs)
                 logger.set_total(len(files)) 
                 logger.progress_update(progress)
+                inputs = []
 
             if event.is_terminated():
                 return True, "用户终止"
@@ -790,7 +779,7 @@ def detection_processing(cfg, event, logger, share):
         if filecount - progress < 2*batchsize:
             num = filecount - progress
 
-        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'], var_threshold=1000)
+        bg_subtractor = BackgroundSubtractor(warmup_frames=cfg['background_frame_number'], var_threshold=cfg.get('detection_var_threshold',1000))
         frames = [common.rasterio_read(os.path.join(directory, file)) for file in files[progress:progress+num]]
         bg_subtractor.warmup(frames)
         for name, frame in zip(files[progress:progress+num], frames):

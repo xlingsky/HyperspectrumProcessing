@@ -33,7 +33,7 @@ class TrackingConfig:
     min_velocity: float = 0.0    # pixels/frame
     max_velocity: float = 100.0  # pixels/frame
     max_acceleration: float = 2.0  # pixels/frame²
-    max_innovation: float = 10.0  # pixels²
+    std_innovation: float = 2  # pixels²
     
 @dataclass
 class KalmanConfig:
@@ -51,7 +51,7 @@ class KalmanConfig:
     dt: float = 1.0
     
     # Adaptation for small objects
-    adapt_for_small_objects: bool = True
+    adapt_for_small_objects: bool = False
     small_object_max_size: int = 32  # pixels
     adaptive_noise_scaling: float = 2.0  # Scale noise for small objects
     
@@ -75,7 +75,7 @@ class Tracker:
         self.innovation_history: List[Tuple[float, float]] = []
         
         # For adaptive noise
-        self.object_size: Optional[Tuple[int, int]] = None
+        self.object_size: Optional[np.ndarray] = None
         self.missing_frames = 0
         self.confidence = 1.0 
 
@@ -172,7 +172,7 @@ class Tracker:
                   start_frame: int, seed_id: int, template: np.ndarray, seed: dict,
                   initial_position: Tuple[float, float],
                   initial_velocity: Optional[Tuple[float, float]] = None,
-                  initial_size: Optional[Tuple[int, int]] = None):
+                  initial_size: Optional[np.ndarray] = None):
         """
         Initialize the Kalman filter with initial state
         
@@ -182,7 +182,7 @@ class Tracker:
             initial_size: (width, height) object size for adaptive noise (optional)
         """
         # Store object size for adaptive noise
-        self.object_size = initial_size
+        self.object_size = np.array(seed['bbox'][2:], dtype=np.float32) if initial_size is None else initial_size
         
         # Set initial state based on motion model
         if self.config.motion_model == 'constant_velocity':
@@ -316,6 +316,8 @@ class Tracker:
             self.template = template
 
         self.seed_history.append(info)
+
+        self.object_size = (self.object_size+np.array(info['seed']['bbox'][2:]))/2
         
         return corrected_position
     
@@ -430,7 +432,8 @@ class Tracker:
     def save(self, filepath:str, frames:list[str]):
         try:
             with open(filepath, 'w') as f:
-                f.write(f'{self.start_frame} {len(self.history)} {self.confidence:.2f}\n')
+                metrics = self.get_performance_metrics()
+                f.write(f'{self.start_frame} {len(self.history)} {metrics["avg_innovation"]:.2f} {metrics["std_innovation"]:.2f}\n')#{self.confidence:.2f}
                 for i, info in enumerate(self.seed_history):
                     seed = info['seed']
                     f.write(f'{frames[self.start_frame+i]}\t{seed['centroid'][0]:.2f}\t{seed['centroid'][1]:.2f}\t{seed['intensity']:.1f}\t{seed['area']:.0f}\t{info['id']}\n')
@@ -568,6 +571,22 @@ class Manager:
         
         return track
 
+    def _query_seed(self, seeds: List[Dict], seedtree: KDTree, position: Tuple[float, float], seed : Dict, distance_upper_bound : float,  k=3, min_confidence=0.5) -> Tuple[float, int]:
+        if seedtree is None:
+            return min_confidence, -1
+        _, indices = seedtree.query(position, k=k, distance_upper_bound=distance_upper_bound)
+        best_id = -1
+        for id in indices:
+            if id >= len(seeds):
+                break
+            intensity0 = seed['intensity']
+            intensity1 = seeds[id]['intensity']
+            confidence = 1 - abs(intensity1-intensity0)/max(intensity0, intensity1)
+            if confidence > min_confidence:
+                min_confidence = confidence
+                best_id = id
+        return min_confidence, best_id
+
     def update_tracks(self,
                       seeds: List[Dict],
                       tracks: List[Tracker],
@@ -584,40 +603,40 @@ class Manager:
             # Predict position
             predicted_pos = track.predict()
             predicted_frame_pos = (predicted_pos[0] - camera_motion[0], predicted_pos[1] - camera_motion[1])
-            dist, best_seed_idx = kdtree_seeds.query(predicted_frame_pos) if kdtree_seeds is not None else (float('inf'), -1)
-            if dist < self.config.distance_to_merge:
+            confidence, best_seed_idx = self._query_seed(seeds, kdtree_seeds, predicted_frame_pos, track.seed_history[-1]['seed'], self.config.distance_to_merge+np.max(track.object_size))
+            # kdtree_seeds.query(predicted_frame_pos) if kdtree_seeds is not None else (float('inf'), -1)
+            if best_seed_idx >=0 :
                 associations[track_id] = {
                     'id': best_seed_idx,
                     'seed': seeds[best_seed_idx],
-                    'distance': dist,
-                    'confidence': 0.5
+                    'distance': 0,
+                    'confidence': confidence #self.config.correlation_threshold
                 }
                 seed_occupied[best_seed_idx] = True
                 continue
             
             # Find best matching seed
             best_seed_idx = -1
-            best_distance = float('inf')
             best_match_confidence = 0.0
 
             match_result = self._match_template(
                 frame,
                 track.get_template(),
                 predicted_frame_pos,
-                self.config.search_margin // 2,
+                (self.config.search_margin + max(track.get_template().shape[0], track.get_template().shape[1]) )// 2,
                 scales=[1.0]
             )
 
             if match_result['confidence'] > self.config.seed_correlation_threshold:
-                dist, best_seed_idx = kdtree_seeds.query(match_result['position']) if kdtree_seeds is not None else (float('inf'), -1)
-                if dist < self.config.distance_to_merge:
-                    best_distance = dist
+                confidence, best_seed_idx = self._query_seed(seeds, kdtree_seeds, match_result['position'], track.seed_history[-1]['seed'], self.config.distance_to_merge+np.max(track.object_size))
+                # dist, best_seed_idx = kdtree_seeds.query(match_result['position']) if kdtree_seeds is not None else (float('inf'), -1)
+                if best_seed_idx >= 0:
                     best_match_confidence = match_result['confidence']
                     seed_occupied[best_seed_idx] = True
                     associations[track_id] = {
                         'id': best_seed_idx,
                         'seed': seeds[best_seed_idx],
-                        'distance': best_distance,
+                        'distance': 0,
                         'confidence': best_match_confidence
                     }
                 elif match_result['confidence'] > self.config.correlation_threshold:
@@ -704,16 +723,23 @@ class Manager:
         return True
 
     def _evaluate_track_quality(self, track: Tracker) -> float:
+        valid_frame_number = track.valid_frame_number() 
         if track.missing_frames > self.config.max_missing_frames:
             return 0.0
         if len(track.history) >= min(self.config.min_track_length//2, 5):
+            if valid_frame_number/ len(track.history) < 0.5:
+                return 0.0
             speed = np.linalg.norm(np.array(track.history[-1]) - np.array(track.history[0])) / (len(track.history)-1)
             if speed < self.config.min_velocity or speed > self.config.max_velocity:
                 return 0.0
-        # metrics = track.get_performance_metrics()
-        # if len(metrics)>0 and metrics['max_innovation'] > self.config.max_innovation:
-        #     return 0.0
-        return track.valid_frame_number() / self.config.min_track_length
+            speed = np.linalg.norm(np.array(track.get_velocity()))
+            if speed < self.config.min_velocity or speed > self.config.max_velocity:
+                return 0.0
+        # if 2*self.config.min_track_length >= len(track.history) >= self.config.min_track_length :
+        #     metrics = track.get_performance_metrics()
+        #     if len(metrics)>0 and metrics['max_innovation'] > 10:
+        #         return 0.0
+        return valid_frame_number / self.config.min_track_length
 
     def check(self) -> Tuple[List[Tracker], List[Tracker]]:
         """Check and remove lost tracks"""
